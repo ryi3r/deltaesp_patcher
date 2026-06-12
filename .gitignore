@@ -1,0 +1,6 @@
+/target
+/patch/**/*
+/packaged/**/*
+/data.bin
+/patching_error.txt
+/uninstalling_error.txt
