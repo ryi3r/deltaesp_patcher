@@ -1,6 +1,6 @@
 [package]
 name = "deltaesp_patcher"
-version = "1.0.7"
+version = "1.0.8"
 edition = "2024"
 authors = ["ryi3r <itsryi3r@gmail.com>"]
 

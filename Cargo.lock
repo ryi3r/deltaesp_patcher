@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "deltaesp_patcher"
-version = "1.0.7"
+version = "1.0.8"
 dependencies = [
  "oxidelta",
  "parking_lot",

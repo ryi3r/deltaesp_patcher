@@ -23,6 +23,8 @@ use sola_raylib::{
     texture::{Image, Texture2D},
     window::{self, WindowState},
 };
+#[allow(unused_imports)]
+use oxidelta::compress::{CompressOptions, encoder, decoder};
 
 use crate::{
     image_depth_renderer::ImageDepthRenderer, image_soul_blur_renderer::ImageSoulBlurRenderer,
@@ -674,8 +676,6 @@ fn main() {
                                                 let bpath = spath.with_added_extension("bak");
                                                 if bpath.exists() && bpath.is_file() {
                                                     if fs::metadata(&bpath).unwrap().len() > 0 {
-                                                        use oxidelta::compress::decoder;
-
                                                         if let Ok(patched) = decoder::decode_all(&fs::read(&spath).unwrap(), &fs::read(&bpath).unwrap()) {
                                                             fs::write(spath, &patched).unwrap();
                                                         } else {
@@ -802,33 +802,35 @@ fn main() {
                                                     }
                                                 }.components().skip(comp_count));
                                                 let bpath = spath.with_added_extension("bak");
-                                                let mut backup = false;
-                                                if !bpath.exists() {
-                                                    //println!("spath:{spath:?},bpath:{bpath:?}");
+                                                //println!("spath:{spath:?},bpath:{bpath:?}");
+                                                if !is_xdelta {
                                                     if spath.exists() {
-                                                        backup = true;
-                                                        if !is_xdelta {
-                                                            use oxidelta::compress::{CompressOptions, encoder};
-
-                                                            println!("making xdelta for backup");
-                                                            *progress.lock() = format!("Haciendo backup de {show_path}...");
-                                                            let mut fb = BufWriter::new(File::create(&bpath).unwrap());
-                                                            encoder::encode_all(
-                                                                &mut fb,
-                                                                &fs::read(f.path()).unwrap(),
-                                                                &fs::read(&spath).unwrap(),
-                                                                CompressOptions::default())
-                                                                .unwrap();
-                                                            fb.flush().unwrap();
+                                                        let mut data = fs::read(&spath).unwrap();
+                                                        if bpath.exists() {
+                                                            println!("decoding backup xdelta");
+                                                            *progress.lock() = format!("Decodificando el backup de {show_path}...");
+                                                            if let Ok(d) = decoder::decode_all(&data, &fs::read(&bpath).unwrap()) {
+                                                                data = d;
+                                                            } else {
+                                                                println!("backup decode failed! was it an update?");
+                                                            }
                                                         }
+                                                        println!("making xdelta for backup");
+                                                        *progress.lock() = format!("Haciendo backup de {show_path}...");
+                                                        let mut fb = BufWriter::new(File::create(&bpath).unwrap());
+                                                        encoder::encode_all(
+                                                            &mut fb,
+                                                            &fs::read(f.path()).unwrap(),
+                                                            &data,
+                                                            CompressOptions::default())
+                                                            .unwrap();
+                                                        fb.flush().unwrap();
                                                         //fs::copy(&spath, &bpath).unwrap();
                                                     } else {
                                                         fs::write(&bpath, []).unwrap();
                                                     }
                                                 }
                                                 if is_xdelta {
-                                                    use oxidelta::compress::{CompressOptions, decoder, encoder};
-
                                                     let mut read = fs::read(&spath).unwrap();
                                                     if bpath.exists() && bpath.is_file() {
                                                         *progress.lock() = format!("Decodificando el backup de {show_path}...");
@@ -836,26 +838,23 @@ fn main() {
                                                             read = r;
                                                         } else {
                                                             println!("backup decode failed! was it an update?");
-                                                            backup = true;
                                                         }
                                                     }
                                                     //println!("og:{spath:?},patch:{:?}", f.path());
                                                     *progress.lock() = format!("Aplicando el parche para {show_path}...");
                                                     let dec = decoder::decode_all(&read, &fs::read(f.path()).unwrap()).unwrap();
                                                     
-                                                    if backup {
-                                                        println!("making xdelta for backup");
-                                                        *progress.lock() = format!("Realizando backup de {show_path}...");
-                                                        {
-                                                            //fs::write(bpath.with_added_extension("source"), &dec).unwrap();
-                                                            //fs::write(bpath.with_added_extension("target"), &read).unwrap();
-                                                            let mut fb = BufWriter::new(File::create(&bpath).unwrap());
-                                                            encoder::encode_all(&mut fb, &dec, &read, CompressOptions {
-                                                                level: 3,
-                                                                ..Default::default()
-                                                            }).unwrap();
-                                                            fb.flush().unwrap();
-                                                        }
+                                                    println!("making xdelta for backup");
+                                                    *progress.lock() = format!("Realizando backup de {show_path}...");
+                                                    {
+                                                        //fs::write(bpath.with_added_extension("source"), &dec).unwrap();
+                                                        //fs::write(bpath.with_added_extension("target"), &read).unwrap();
+                                                        let mut fb = BufWriter::new(File::create(&bpath).unwrap());
+                                                        encoder::encode_all(&mut fb, &dec, &read, CompressOptions {
+                                                            level: 3,
+                                                            ..Default::default()
+                                                        }).unwrap();
+                                                        fb.flush().unwrap();
                                                     }
 
                                                     {

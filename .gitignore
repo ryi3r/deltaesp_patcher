@@ -1,5 +1,5 @@
 /target
-/patch/**/*
+/patch*/**/*
 /packaged/**/*
 /data.bin
 /patching_error.txt
