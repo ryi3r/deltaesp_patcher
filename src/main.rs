@@ -1190,7 +1190,7 @@ fn main() {
             }
             #[cfg(not(feature = "uninstaller"))]
             if inst_alpha > 0. {
-                Typer::draw_text_half(&mut d, &fnt, Vector2::new(10., 10.), "Presiona [X/SHIFT] para ir más rápido.\nPresiona [C/CTRL] para saltarse la intro.", alpha, inst_alpha);
+                Typer::draw_text_half(&mut d, &fnt, Vector2::new(10., 10.), "Presiona [X/SHIFT] para ir más rápido.\nPresiona [C/CTRL] para saltar la intro.", alpha, inst_alpha);
             }
             if let Some(goner) = goner.as_ref() {
                 let mut scale = 1.;
