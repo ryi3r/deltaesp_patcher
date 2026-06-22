@@ -18,6 +18,8 @@ pub struct Typer {
     pub playing: bool,
     chars: usize,
     delay: HashMap<usize, usize>,
+    pub instant_show: bool,
+    pub increase_typer: bool,
 }
 
 impl Default for Typer {
@@ -29,6 +31,8 @@ impl Default for Typer {
             playing: false,
             chars: 0,
             delay: HashMap::new(),
+            instant_show: false,
+            increase_typer: true,
         }
     }
 }
@@ -323,6 +327,7 @@ impl Typer {
                 ntext += &char.to_string();
             }
         }
+        self.increase_typer = true;
         self.text = ntext;
         self.playing = true;
         self.timer = Instant::now();
@@ -333,6 +338,8 @@ impl Typer {
         self.text = "".into();
         self.playing = false;
         self.timer = Instant::now();
+        self.instant_show = false;
+        self.increase_typer = true;
     }
 
     pub fn is_finished(&self) -> bool {
@@ -349,14 +356,18 @@ impl Typer {
         let is_skip_pressed = d.is_key_down(KeyboardKey::KEY_X)
             || d.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
             || d.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
-        if self.timer.elapsed().as_secs_f32()
-            > TARGET_CHAR_TIME
-                / (if is_skip_pressed { 2. } else { 1. })
-                / (if cfg!(feature = "uninstaller") {
-                    2.
-                } else {
-                    1.
-                })
+        if self.instant_show {
+            self.chars = self.text.len() + 1;
+        }
+        if self.chars < self.text.len()
+            && self.timer.elapsed().as_secs_f32()
+                > TARGET_CHAR_TIME
+                    / (if is_skip_pressed { 2. } else { 1. })
+                    / (if cfg!(feature = "uninstaller") {
+                        2.
+                    } else {
+                        1.
+                    })
         {
             self.timer = Instant::now();
             if self.delay.contains_key(&self.chars) && !is_skip_pressed {

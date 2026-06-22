@@ -245,6 +245,7 @@ fn main() {
         typer.pos.y = 100.;
     }
     let mut galpha = 1f32;
+    let mut falpha = 1f32;
     let mut inst_alpha = 0f32;
     let mut goner_alpha = 1f32;
     let mut patch_task = None::<JoinHandle<()>>;
@@ -255,6 +256,7 @@ fn main() {
     let mut qanswered = false;
     #[allow(unused)]
     let mut skipped = false;
+    let mut skipping = false;
 
     let mut close = false;
     #[cfg(feature = "uninstaller")]
@@ -280,14 +282,24 @@ fn main() {
         let delta = d.get_frame_time();
         d.draw_texture_mode(&thread, &mut render, |mut d| {
             d.clear_background(Color::BLACK);
+            if typer.playing {
+                if skipping {
+                    if falpha > 0. {
+                        falpha = (falpha - delta).max(0.);
+                    }
+                } else if falpha < 1. {
+                    falpha = (falpha + delta).min(1.);
+                }
+            }
             #[cfg(not(feature = "uninstaller"))]
             if (d.is_key_pressed(KeyboardKey::KEY_C) || d.is_key_pressed(KeyboardKey::KEY_LEFT_CONTROL) || d.is_key_pressed(KeyboardKey::KEY_RIGHT_CONTROL)) && state < PatcherState::SoulExit {
                 skipped = true;
                 state = PatcherState::SoulExit;
                 idr_time = Instant::now();
                 play_another_him = true;
-                typer.stop();
+                typer.increase_typer = false;
                 galpha = 0.;
+                skipping = true;
                 if soul.time >= soul.get_max_time() {
                     soul.momentum = -0.5;
                     soul.time = soul.get_max_time();
@@ -431,7 +443,10 @@ fn main() {
                     }
                     if galpha >= 1. && pitch_another_him >= 0.96 && inst_alpha <= 0. {
                         typer.pos.y = 100.;
+                        skipping = false;
                         state = if skipped {
+                            typer.stop();
+                            typer.instant_show = true;
                             PatcherState::StartPatchQuestion
                         } else {
                             PatcherState::StartTalkE
@@ -1122,7 +1137,9 @@ fn main() {
                 soul.draw(&mut d);
             }
             let alpha = (timer.elapsed().as_secs_f32() * 2.).sin() * 0.2 + 0.6;
-            typer.draw(&fnt, &mut d, alpha, galpha.clamp(0., 1.));
+            let fake_galpha = if skipping { 1. } else { galpha };
+            //println!("galpha={fake_galpha:.2} falpha={falpha:.2} final={:.2}", fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
+            typer.draw(&fnt, &mut d, alpha, fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
             {
                 let cond;
                 #[cfg(not(feature = "uninstaller"))]
