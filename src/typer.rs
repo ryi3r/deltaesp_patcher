@@ -359,7 +359,7 @@ impl Typer {
         if self.instant_show {
             self.chars = self.text.len() + 1;
         }
-        if self.chars < self.text.len()
+        if self.chars < (self.text.len() + 1)
             && self.timer.elapsed().as_secs_f32()
                 > TARGET_CHAR_TIME
                     / (if is_skip_pressed { 2. } else { 1. })

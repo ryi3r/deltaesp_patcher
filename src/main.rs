@@ -820,7 +820,11 @@ fn main() {
                                                 let bpath = spath.with_added_extension("bak");
                                                 //println!("spath:{spath:?},bpath:{bpath:?}");
                                                 if !is_xdelta {
-                                                    if spath.exists() {
+                                                    if spath.exists() && if bpath.exists() {
+                                                        fs::metadata(&bpath).unwrap().len() > 0
+                                                    } else {
+                                                        true
+                                                    } {
                                                         let mut data = fs::read(&spath).unwrap();
                                                         if bpath.exists() {
                                                             println!("decoding backup xdelta");
