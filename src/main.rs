@@ -256,6 +256,7 @@ fn main() {
     let mut qanswered = false;
     #[allow(unused)]
     let mut skipped = false;
+    #[allow(unused_mut)]
     let mut skipping = false;
 
     let mut close = false;
