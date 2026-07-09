@@ -1,6 +1,6 @@
 [package]
 name = "deltaesp_patcher"
-version = "1.0.12"
+version = "1.0.13"
 edition = "2024"
 authors = ["ryi3r <itsryi3r@gmail.com>"]
 
@@ -34,3 +34,7 @@ LegalCopyright = "Equipo DeltaESP & ryi3r @ 2025-2026"
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.release]
+strip = true
+opt-level = "z"

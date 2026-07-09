@@ -138,6 +138,7 @@ fn main() {
             scale += 1;
         }
         rl.set_window_size(640 * scale, 480 * scale);
+        rl.set_window_position((w - rl.get_screen_width()) / 2, (h - rl.get_screen_height()) / 2);
     }
     rl.set_window_icon(
         Image::load_image_from_mem(
@@ -538,7 +539,7 @@ fn main() {
                         galpha = 2.;
                         typer.pos.y = 100.;
                         typer.start("ARRASTRA LA CARPETA\nDE DELTARUNE^^10\nA ESTA VENTANA.");
-                    } else if typer.is_finished() && !folder.lock().is_empty() {
+                    } else if typer.is_finished() && !folder.lock().as_os_str().is_empty() {
                         if galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                         } else {
