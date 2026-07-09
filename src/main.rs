@@ -138,7 +138,12 @@ fn main() {
             scale += 1;
         }
         rl.set_window_size(640 * scale, 480 * scale);
-        rl.set_window_position((w - rl.get_screen_width()) / 2, (h - rl.get_screen_height()) / 2);
+        //println!("{:?}, {:?}, {:?}", ((w - rl.get_screen_width()) / 2, (h - rl.get_screen_height()) / 2), (w, h), (rl.get_screen_width(), rl.get_screen_height()));
+        #[cfg(target_os = "windows")]
+        let extra = 0;
+        #[cfg(target_os = "linux")]
+        let extra = 200;
+        rl.set_window_position((w - rl.get_screen_width()) / 2, ((h - rl.get_screen_height()) / 2) + extra);
     }
     rl.set_window_icon(
         Image::load_image_from_mem(
