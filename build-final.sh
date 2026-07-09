@@ -14,6 +14,6 @@ cp ./target/x86_64-pc-windows-gnu/release/*.exe ./packaged/deltaesp_uninstaller.
 mkdir packaged/patch
 rm packaged/*.dll # non sdl
 cargo +stable build --target x86_64-unknown-linux-gnu -r
-cp ./target/x86_64-unknown-linux-gnu/release/*_patcher ./packaged/linux_deltaesp_patcher
+cp ./target/x86_64-unknown-linux-gnu/release/*_patcher ./packaged/deltaesp_patcher_linux
 cargo +stable build --target x86_64-unknown-linux-gnu -r --features uninstaller
-cp ./target/x86_64-unknown-linux-gnu/release/*_patcher ./packaged/linux_deltaesp_uninstaller
+cp ./target/x86_64-unknown-linux-gnu/release/*_patcher ./packaged/deltaesp_uninstaller_linux
