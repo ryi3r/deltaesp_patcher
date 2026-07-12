@@ -58,7 +58,7 @@ impl ImageSoulBlurRenderer {
                 ),
                 Rectangle::new(
                     self.pos.x,
-                    self.pos.y - self.time + self.get_max(),
+                    self.pos.y - (self.time * 2.) + self.get_max() + (self.spr.height as f32 / 2.),
                     self.spr.width as f32 * 2.,
                     2. * (self.time * 2.),
                 ),

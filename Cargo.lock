@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "deltaesp_patcher"
-version = "1.0.14"
+version = "1.0.15"
 dependencies = [
  "oxidelta",
  "parking_lot",
@@ -1017,9 +1017,8 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "sola-raylib"
-version = "6.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6343d88c6112f88bb7c563707ed4efacdd9e63e6cbec07e5055fac616d8a51bb"
+version = "6.3.0-dev"
+source = "git+https://github.com/ryi3r/sola-raylib.git?branch=main#218eeeef195e29f208f1673687b9c2f629c9c545"
 dependencies = [
  "cfg-if",
  "paste",
@@ -1030,9 +1029,8 @@ dependencies = [
 
 [[package]]
 name = "sola-raylib-sys"
-version = "6.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbcf4ee579fca251c46539b6d5e8c79f11428ca6e127500f53b3e72353ad11d9"
+version = "6.3.0-dev"
+source = "git+https://github.com/ryi3r/sola-raylib.git?branch=main#218eeeef195e29f208f1673687b9c2f629c9c545"
 dependencies = [
  "bindgen",
  "cc",

@@ -1,6 +1,6 @@
 [package]
 name = "deltaesp_patcher"
-version = "1.0.14"
+version = "1.0.15"
 edition = "2024"
 authors = ["ryi3r <itsryi3r@gmail.com>"]
 
@@ -9,7 +9,7 @@ uninstaller = []
 #default = ["uninstaller"]
 
 [dependencies]
-sola-raylib = { version = "6.2.0", features = [
+sola-raylib = { git = "https://github.com/ryi3r/sola-raylib.git", branch = "main", features = [
     #"wayland",
     "opengl_21",
     #"software_render",
@@ -37,4 +37,4 @@ opt-level = 3
 
 [profile.release]
 strip = true
-opt-level = "z"
+opt-level = "s"

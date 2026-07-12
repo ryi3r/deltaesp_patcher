@@ -11,6 +11,8 @@ use std::{
     time::Instant,
 };
 
+#[allow(unused_imports)]
+use oxidelta::compress::{CompressOptions, decoder, encoder};
 use parking_lot::Mutex;
 #[allow(unused_imports)]
 use sola_raylib::{
@@ -23,8 +25,7 @@ use sola_raylib::{
     texture::{Image, Texture2D},
     window::{self, WindowState},
 };
-#[allow(unused_imports)]
-use oxidelta::compress::{CompressOptions, encoder, decoder};
+use sola_raylib::{camera::Camera2D, drawing::RaylibMode2DExt};
 
 use crate::{
     image_depth_renderer::ImageDepthRenderer, image_soul_blur_renderer::ImageSoulBlurRenderer,
@@ -139,11 +140,10 @@ fn main() {
         }
         rl.set_window_size(640 * scale, 480 * scale);
         //println!("{:?}, {:?}, {:?}", ((w - rl.get_screen_width()) / 2, (h - rl.get_screen_height()) / 2), (w, h), (rl.get_screen_width(), rl.get_screen_height()));
-        #[cfg(target_os = "windows")]
-        let extra = 0;
-        #[cfg(target_os = "linux")]
-        let extra = 200;
-        rl.set_window_position((w - rl.get_screen_width()) / 2, ((h - rl.get_screen_height()) / 2) + extra);
+        rl.set_window_position(
+            (w - rl.get_screen_width()) / 2,
+            (h - rl.get_screen_height()) / 2,
+        );
     }
     rl.set_window_icon(
         Image::load_image_from_mem(
@@ -157,7 +157,10 @@ fn main() {
         .unwrap(),
     );
     let audio = RaylibAudio::init_audio_device().unwrap();
-    let mut render = rl.load_render_texture(&thread, 640, 480).unwrap();
+    let camera = Camera2D {
+        zoom: scale as _,
+        ..Default::default()
+    };
     let fnt = {
         let c = whoami::username()
             .unwrap_or(String::from("JUGADOR"))
@@ -186,7 +189,6 @@ fn main() {
             .unwrap(),
         )
         .unwrap();
-
     let timer = Instant::now();
     let mut idr = Vec::new();
     let mut idr_time = Instant::now();
@@ -197,7 +199,8 @@ fn main() {
 
     if let Ok(sl) = steamlocate::locate_all() {
         for lib in sl {
-            if let Ok(Some(a)) = lib.find_app(1_671_210) { // deltarune's steam id
+            if let Ok(Some(a)) = lib.find_app(1_671_210) {
+                // deltarune's steam id
                 *folder.lock() = a.1.resolve_app_dir(&a.0);
                 println!("UPDATE FOLDER");
             }
@@ -213,21 +216,17 @@ fn main() {
         .unwrap();
     #[allow(unused)]
     let mut soul = ImageSoulBlurRenderer::new(img_soul_blur_tex);
+    let wave_aud_appearance = audio
+        .new_wave_from_memory(".wav", &files["audio_appearance.wav"])
+        .unwrap();
+    let wave_aud_another_him = audio
+        .new_wave_from_memory(".ogg", &files["audio_anotherhim.ogg"])
+        .unwrap();
     #[allow(unused)]
-    let aud_appearance = audio
-        .new_sound_from_wave(
-            &audio
-                .new_wave_from_memory(".wav", &files["audio_appearance.wav"])
-                .unwrap(),
-        )
-        .unwrap();
-    let aud_another_him = audio
-        .new_sound_from_wave(
-            &audio
-                .new_wave_from_memory(".ogg", &files["audio_anotherhim.ogg"])
-                .unwrap(),
-        )
-        .unwrap();
+    let aud_appearance = audio.new_sound_from_wave(&wave_aud_appearance).unwrap();
+    let aud_another_him = audio.new_sound_from_wave(&wave_aud_another_him).unwrap();
+    drop(wave_aud_another_him);
+    drop(wave_aud_appearance);
     #[cfg(feature = "uninstaller")]
     let aud_face = audio
         .new_sound_from_wave(
@@ -285,10 +284,12 @@ fn main() {
 
     //let mut cl = 0;
     while !rl.window_should_close() && !close {
+        //println!("FRAME: {state:?} {galpha:.2} {inst_alpha:.2}");
         let mut d = rl.begin_drawing(&thread);
         let delta = d.get_frame_time();
-        d.draw_texture_mode(&thread, &mut render, |mut d| {
-            d.clear_background(Color::BLACK);
+        d.clear_background(Color::BLACK);
+        {
+            let mut d = d.begin_mode2D(camera);
             if typer.playing {
                 if skipping {
                     if falpha > 0. {
@@ -299,7 +300,11 @@ fn main() {
                 }
             }
             #[cfg(not(feature = "uninstaller"))]
-            if (d.is_key_pressed(KeyboardKey::KEY_C) || d.is_key_pressed(KeyboardKey::KEY_LEFT_CONTROL) || d.is_key_pressed(KeyboardKey::KEY_RIGHT_CONTROL)) && state < PatcherState::SoulExit {
+            if (d.is_key_pressed(KeyboardKey::KEY_C)
+                || d.is_key_pressed(KeyboardKey::KEY_LEFT_CONTROL)
+                || d.is_key_pressed(KeyboardKey::KEY_RIGHT_CONTROL))
+                && state < PatcherState::SoulExit
+            {
                 skipped = true;
                 state = PatcherState::SoulExit;
                 idr_time = Instant::now();
@@ -337,7 +342,9 @@ fn main() {
                         galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                     }
                     if inst_alpha < 1. {
-                        inst_alpha = (inst_alpha + (delta * (if is_skip_pressed { 2. } else { 1. }))).min(1.);
+                        inst_alpha = (inst_alpha
+                            + (delta * (if is_skip_pressed { 2. } else { 1. })))
+                        .min(1.);
                     }
                     if galpha <= -1. && inst_alpha >= 1. {
                         state = PatcherState::StartTalkA;
@@ -446,7 +453,8 @@ fn main() {
                         inst_alpha = (inst_alpha - delta).max(0.);
                     }
                     if pitch_another_him < 0.96 {
-                        pitch_another_him = (pitch_another_him + 0.02 * (delta / (1. / 30.))).min(0.96);
+                        pitch_another_him =
+                            (pitch_another_him + 0.02 * (delta / (1. / 30.))).min(0.96);
                     }
                     if galpha >= 1. && pitch_another_him >= 0.96 && inst_alpha <= 0. {
                         typer.pos.y = 100.;
@@ -485,28 +493,30 @@ fn main() {
                     } else {
                         if !qanswered {
                             qalpha = (qalpha + delta).min(1.);
-                            if d.is_key_down(KeyboardKey::KEY_Z) || d.is_key_down(KeyboardKey::KEY_ENTER) || d.is_key_down(KeyboardKey::KEY_KP_ENTER) {
+                            if d.is_key_down(KeyboardKey::KEY_Z)
+                                || d.is_key_down(KeyboardKey::KEY_ENTER)
+                                || d.is_key_down(KeyboardKey::KEY_KP_ENTER)
+                            {
                                 qanswered = true;
                             }
                         } else {
                             qalpha = (qalpha - delta).max(0.);
                         }
-                        if typer.is_finished()
-                            && qanswered {
-                                if galpha > -1. {
-                                    galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        if typer.is_finished() && qanswered {
+                            if galpha > -1. {
+                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                            } else {
+                                typer.stop();
+                                let mut fl = folder.lock();
+                                state = if qoption == 0 && ensure_deltarune_in_folder(&fl) {
+                                    PatcherState::Patch
                                 } else {
-                                    typer.stop();
-                                    let mut fl = folder.lock();
-                                    state = if qoption == 0 && ensure_deltarune_in_folder(&fl) {
-                                        PatcherState::Patch
-                                    } else {
-                                        println!("CLEAR FOLDER (1)");
-                                        *fl = PathBuf::new();
-                                        PatcherState::RefuseStartPatch
-                                    };
-                                }
+                                    println!("CLEAR FOLDER (1)");
+                                    *fl = PathBuf::new();
+                                    PatcherState::RefuseStartPatch
+                                };
                             }
+                        }
                     }
                 }
                 #[cfg(not(feature = "uninstaller"))]
@@ -603,27 +613,29 @@ fn main() {
                     } else {
                         if !qanswered {
                             qalpha = (qalpha + delta).min(1.);
-                            if d.is_key_down(KeyboardKey::KEY_Z) || d.is_key_down(KeyboardKey::KEY_ENTER) || d.is_key_down(KeyboardKey::KEY_KP_ENTER) {
+                            if d.is_key_down(KeyboardKey::KEY_Z)
+                                || d.is_key_down(KeyboardKey::KEY_ENTER)
+                                || d.is_key_down(KeyboardKey::KEY_KP_ENTER)
+                            {
                                 qanswered = true;
                             }
                         } else {
                             qalpha = (qalpha - delta).max(0.);
                         }
-                        if typer.is_finished()
-                            && qanswered {
-                                if galpha > -1. {
-                                    galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        if typer.is_finished() && qanswered {
+                            if galpha > -1. {
+                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                            } else {
+                                typer.stop();
+                                let mut fl = folder.lock();
+                                state = if qoption == 0 {
+                                    PatcherState::Uninstalling
                                 } else {
-                                    typer.stop();
-                                    let mut fl = folder.lock();
-                                    state = if qoption == 0 {
-                                        PatcherState::Uninstalling
-                                    } else {
-                                        *fl = PathBuf::new();
-                                        PatcherState::EndKeptTalkA
-                                    };
-                                }
+                                    *fl = PathBuf::new();
+                                    PatcherState::EndKeptTalkA
+                                };
                             }
+                        }
                     }
                 }
                 #[cfg(feature = "uninstaller")]
@@ -647,7 +659,9 @@ fn main() {
                                     while let Some(dir) = dirs.pop() {
                                         if let Ok(d) = fs::read_dir(dir) {
                                             for f in d.flatten() {
-                                                if let Ok(ft) = f.file_type() && ft.is_dir() {
+                                                if let Ok(ft) = f.file_type()
+                                                    && ft.is_dir()
+                                                {
                                                     dirs.push(f.path());
                                                 } else {
                                                     count += 1;
@@ -661,7 +675,9 @@ fn main() {
                                 while let Some(dir) = dirs.pop() {
                                     if let Ok(d) = fs::read_dir(&dir) {
                                         for f in d.flatten() {
-                                            if let Ok(ft) = f.file_type() && ft.is_dir() {
+                                            if let Ok(ft) = f.file_type()
+                                                && ft.is_dir()
+                                            {
                                                 dirs.push(f.path());
                                             }
                                         }
@@ -670,11 +686,21 @@ fn main() {
                                     let _ = fs::create_dir_all(&dir);
                                     if let Ok(d) = fs::read_dir(&dir) {
                                         for f in d.flatten() {
-                                            if let Ok(ft) = f.file_type() && ft.is_file() {
-                                                let mut show_path = f.path().components().skip(comp_count).collect::<PathBuf>().to_string_lossy().to_string().replace(".xdelta", "");
+                                            if let Ok(ft) = f.file_type()
+                                                && ft.is_file()
+                                            {
+                                                let mut show_path = f
+                                                    .path()
+                                                    .components()
+                                                    .skip(comp_count)
+                                                    .collect::<PathBuf>()
+                                                    .to_string_lossy()
+                                                    .to_string()
+                                                    .replace(".xdelta", "");
                                                 println!("processing: {show_path}");
                                                 if show_path.len() > 20 {
-                                                    show_path = show_path[(show_path.len() - 20)..].to_string();
+                                                    show_path = show_path[(show_path.len() - 20)..]
+                                                        .to_string();
                                                     let mut idx = show_path.find('/');
                                                     if idx.is_none() {
                                                         idx = show_path.find('\\');
@@ -685,23 +711,35 @@ fn main() {
                                                     show_path = String::from("...") + &show_path;
                                                 }
 
-                                                *progress.lock() = format!("Procesando {show_path}...");
+                                                *progress.lock() =
+                                                    format!("Procesando {show_path}...");
                                                 let mut spath = folder.lock().clone();
-                                                spath.extend({
-                                                    let p = f.path();
-                                                    if let Some(ext) = p.extension() && ext == "xdelta" {
-                                                        p.with_extension("")
-                                                    } else {
-                                                        p
+                                                spath.extend(
+                                                    {
+                                                        let p = f.path();
+                                                        if let Some(ext) = p.extension()
+                                                            && ext == "xdelta"
+                                                        {
+                                                            p.with_extension("")
+                                                        } else {
+                                                            p
+                                                        }
                                                     }
-                                                }.components().skip(comp_count));
+                                                    .components()
+                                                    .skip(comp_count),
+                                                );
                                                 let bpath = spath.with_added_extension("bak");
                                                 if bpath.exists() && bpath.is_file() {
                                                     if fs::metadata(&bpath).unwrap().len() > 0 {
-                                                        if let Ok(patched) = decoder::decode_all(&fs::read(&spath).unwrap(), &fs::read(&bpath).unwrap()) {
+                                                        if let Ok(patched) = decoder::decode_all(
+                                                            &fs::read(&spath).unwrap(),
+                                                            &fs::read(&bpath).unwrap(),
+                                                        ) {
                                                             fs::write(spath, &patched).unwrap();
                                                         } else {
-                                                            println!("unable to apply backup patch! was it an update?");
+                                                            println!(
+                                                                "unable to apply backup patch! was it an update?"
+                                                            );
                                                         }
                                                         //fs::copy(&bpath, &spath).unwrap();
                                                     } else {
@@ -713,7 +751,8 @@ fn main() {
 
                                                 done += 1;
                                                 let tp = *typer_progress.lock();
-                                                *typer_progress.lock() = tp.max(done as f32 / count as f32);
+                                                *typer_progress.lock() =
+                                                    tp.max(done as f32 / count as f32);
                                             }
                                         }
                                     }
@@ -727,24 +766,32 @@ fn main() {
                         galpha = 2.;
                         goner_alpha = galpha;
                         typer.start("LA ESCISIÓN^^10\nESTÁ TOMANDO LUGAR.");
-                    } else if patch_task.as_ref().map(|x| x.is_finished()).unwrap_or(false) && typer.is_finished() {
+                    } else if patch_task
+                        .as_ref()
+                        .map(|x| x.is_finished())
+                        .unwrap_or(false)
+                        && typer.is_finished()
+                    {
                         if galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                         } else {
                             *progress.lock() = String::new();
                             typer.stop();
                             if let Some(pt) = patch_task.take()
-                                && let Err(e) = pt.join() {
-                                    let mut f = BufWriter::new(File::create("uninstalling_error.txt").unwrap());
-                                    f.write_all(if let Some(s) = e.downcast_ref::<&str>() {
-                                        s.as_bytes()
-                                    } else if let Some(s) = e.downcast_ref::<String>() {
-                                        s.as_bytes()
-                                    } else {
-                                        "???".as_bytes()
-                                    }).unwrap();
-                                    f.flush().unwrap();
-                                }
+                                && let Err(e) = pt.join()
+                            {
+                                let mut f =
+                                    BufWriter::new(File::create("uninstalling_error.txt").unwrap());
+                                f.write_all(if let Some(s) = e.downcast_ref::<&str>() {
+                                    s.as_bytes()
+                                } else if let Some(s) = e.downcast_ref::<String>() {
+                                    s.as_bytes()
+                                } else {
+                                    "???".as_bytes()
+                                })
+                                .unwrap();
+                                f.flush().unwrap();
+                            }
                             state = PatcherState::EndUninstalledTalkA;
                         }
                     }
@@ -753,8 +800,21 @@ fn main() {
                 PatcherState::Patch => {
                     if patch_task.is_none() {
                         {
-                            let f = files.keys().filter(|x| x.starts_with("goners/")).collect::<Vec<_>>();
-                            goner = Some(d.load_texture_from_image(&thread, &Image::load_image_from_mem(".png", &files[f[rand::random_range(0..f.len())]]).unwrap()).unwrap());
+                            let f = files
+                                .keys()
+                                .filter(|x| x.starts_with("goners/"))
+                                .collect::<Vec<_>>();
+                            goner = Some(
+                                d.load_texture_from_image(
+                                    &thread,
+                                    &Image::load_image_from_mem(
+                                        ".png",
+                                        &files[f[rand::random_range(0..f.len())]],
+                                    )
+                                    .unwrap(),
+                                )
+                                .unwrap(),
+                            );
                         }
                         *typer_progress.lock() = 0.;
                         *progress.lock() = String::new();
@@ -774,7 +834,9 @@ fn main() {
                                     while let Some(dir) = dirs.pop() {
                                         if let Ok(d) = fs::read_dir(dir) {
                                             for f in d.flatten() {
-                                                if let Ok(ft) = f.file_type() && ft.is_dir() {
+                                                if let Ok(ft) = f.file_type()
+                                                    && ft.is_dir()
+                                                {
                                                     dirs.push(f.path());
                                                 } else {
                                                     count += 1;
@@ -788,7 +850,9 @@ fn main() {
                                 while let Some(dir) = dirs.pop() {
                                     if let Ok(d) = fs::read_dir(&dir) {
                                         for f in d.flatten() {
-                                            if let Ok(ft) = f.file_type() && ft.is_dir() {
+                                            if let Ok(ft) = f.file_type()
+                                                && ft.is_dir()
+                                            {
                                                 dirs.push(f.path());
                                             }
                                         }
@@ -797,11 +861,21 @@ fn main() {
                                     let _ = fs::create_dir_all(&dir);
                                     if let Ok(d) = fs::read_dir(&dir) {
                                         for f in d.flatten() {
-                                            if let Ok(ft) = f.file_type() && ft.is_file() {
-                                                let mut show_path = f.path().components().skip(comp_count).collect::<PathBuf>().to_string_lossy().to_string().replace(".xdelta", "");
+                                            if let Ok(ft) = f.file_type()
+                                                && ft.is_file()
+                                            {
+                                                let mut show_path = f
+                                                    .path()
+                                                    .components()
+                                                    .skip(comp_count)
+                                                    .collect::<PathBuf>()
+                                                    .to_string_lossy()
+                                                    .to_string()
+                                                    .replace(".xdelta", "");
                                                 println!("processing: {show_path}");
                                                 if show_path.len() > 20 {
-                                                    show_path = show_path[(show_path.len() - 20)..].to_string();
+                                                    show_path = show_path[(show_path.len() - 20)..]
+                                                        .to_string();
                                                     let mut idx = show_path.find('/');
                                                     if idx.is_none() {
                                                         idx = show_path.find('\\');
@@ -812,44 +886,67 @@ fn main() {
                                                     show_path = String::from("...") + &show_path;
                                                 }
 
-                                                *progress.lock() = format!("Procesando {show_path}...");
-                                                let is_xdelta = f.path().extension().map(|ext| ext == "xdelta").unwrap_or(false);
+                                                *progress.lock() =
+                                                    format!("Procesando {show_path}...");
+                                                let is_xdelta = f
+                                                    .path()
+                                                    .extension()
+                                                    .map(|ext| ext == "xdelta")
+                                                    .unwrap_or(false);
                                                 let mut spath = folder.lock().clone();
-                                                spath.extend({
-                                                    let p = f.path();
-                                                    if is_xdelta {
-                                                        p.with_extension("")
-                                                    } else {
-                                                        p
+                                                spath.extend(
+                                                    {
+                                                        let p = f.path();
+                                                        if is_xdelta {
+                                                            p.with_extension("")
+                                                        } else {
+                                                            p
+                                                        }
                                                     }
-                                                }.components().skip(comp_count));
+                                                    .components()
+                                                    .skip(comp_count),
+                                                );
                                                 let bpath = spath.with_added_extension("bak");
                                                 //println!("spath:{spath:?},bpath:{bpath:?}");
                                                 if !is_xdelta {
-                                                    if spath.exists() && if bpath.exists() {
-                                                        fs::metadata(&bpath).unwrap().len() > 0
-                                                    } else {
-                                                        true
-                                                    } {
+                                                    if spath.exists()
+                                                        && if bpath.exists() {
+                                                            fs::metadata(&bpath).unwrap().len() > 0
+                                                        } else {
+                                                            true
+                                                        }
+                                                    {
                                                         let mut data = fs::read(&spath).unwrap();
                                                         if bpath.exists() {
                                                             println!("decoding backup xdelta");
-                                                            *progress.lock() = format!("Decodificando el backup de {show_path}...");
-                                                            if let Ok(d) = decoder::decode_all(&data, &fs::read(&bpath).unwrap()) {
+                                                            *progress.lock() = format!(
+                                                                "Decodificando el backup de {show_path}..."
+                                                            );
+                                                            if let Ok(d) = decoder::decode_all(
+                                                                &data,
+                                                                &fs::read(&bpath).unwrap(),
+                                                            ) {
                                                                 data = d;
                                                             } else {
-                                                                println!("backup decode failed! was it an update?");
+                                                                println!(
+                                                                    "backup decode failed! was it an update?"
+                                                                );
                                                             }
                                                         }
                                                         println!("making xdelta for backup");
-                                                        *progress.lock() = format!("Haciendo backup de {show_path}...");
-                                                        let mut fb = BufWriter::new(File::create(&bpath).unwrap());
+                                                        *progress.lock() = format!(
+                                                            "Haciendo backup de {show_path}..."
+                                                        );
+                                                        let mut fb = BufWriter::new(
+                                                            File::create(&bpath).unwrap(),
+                                                        );
                                                         encoder::encode_all(
                                                             &mut fb,
                                                             &fs::read(f.path()).unwrap(),
                                                             &data,
-                                                            CompressOptions::default())
-                                                            .unwrap();
+                                                            CompressOptions::default(),
+                                                        )
+                                                        .unwrap();
                                                         fb.flush().unwrap();
                                                         //fs::copy(&spath, &bpath).unwrap();
                                                     } else {
@@ -859,32 +956,57 @@ fn main() {
                                                 if is_xdelta {
                                                     let mut read = fs::read(&spath).unwrap();
                                                     if bpath.exists() && bpath.is_file() {
-                                                        *progress.lock() = format!("Decodificando el backup de {show_path}...");
-                                                        if let Ok(r) = decoder::decode_all(&read, &fs::read(&bpath).unwrap()) {
+                                                        *progress.lock() = format!(
+                                                            "Decodificando el backup de {show_path}..."
+                                                        );
+                                                        if let Ok(r) = decoder::decode_all(
+                                                            &read,
+                                                            &fs::read(&bpath).unwrap(),
+                                                        ) {
                                                             read = r;
                                                         } else {
-                                                            println!("backup decode failed! was it an update?");
+                                                            println!(
+                                                                "backup decode failed! was it an update?"
+                                                            );
                                                         }
                                                     }
                                                     //println!("og:{spath:?},patch:{:?}", f.path());
-                                                    *progress.lock() = format!("Aplicando el parche para {show_path}...");
-                                                    let dec = decoder::decode_all(&read, &fs::read(f.path()).unwrap()).unwrap();
-                                                    
+                                                    *progress.lock() = format!(
+                                                        "Aplicando el parche para {show_path}..."
+                                                    );
+                                                    let dec = decoder::decode_all(
+                                                        &read,
+                                                        &fs::read(f.path()).unwrap(),
+                                                    )
+                                                    .unwrap();
+
                                                     println!("making xdelta for backup");
-                                                    *progress.lock() = format!("Realizando backup de {show_path}...");
+                                                    *progress.lock() = format!(
+                                                        "Realizando backup de {show_path}..."
+                                                    );
                                                     {
                                                         //fs::write(bpath.with_added_extension("source"), &dec).unwrap();
                                                         //fs::write(bpath.with_added_extension("target"), &read).unwrap();
-                                                        let mut fb = BufWriter::new(File::create(&bpath).unwrap());
-                                                        encoder::encode_all(&mut fb, &dec, &read, CompressOptions {
-                                                            level: 3,
-                                                            ..Default::default()
-                                                        }).unwrap();
+                                                        let mut fb = BufWriter::new(
+                                                            File::create(&bpath).unwrap(),
+                                                        );
+                                                        encoder::encode_all(
+                                                            &mut fb,
+                                                            &dec,
+                                                            &read,
+                                                            CompressOptions {
+                                                                level: 3,
+                                                                ..Default::default()
+                                                            },
+                                                        )
+                                                        .unwrap();
                                                         fb.flush().unwrap();
                                                     }
 
                                                     {
-                                                        let mut fw = BufWriter::new(File::create(&spath).unwrap());
+                                                        let mut fw = BufWriter::new(
+                                                            File::create(&spath).unwrap(),
+                                                        );
                                                         fw.write_all(&dec).unwrap();
                                                         fw.flush().unwrap();
                                                     }
@@ -892,7 +1014,8 @@ fn main() {
 
                                                     *progress.lock() = format!("{show_path} OK");
                                                 } else {
-                                                    *progress.lock() = format!("Copiando archivo {show_path}");
+                                                    *progress.lock() =
+                                                        format!("Copiando archivo {show_path}");
                                                     //println!("{:?},{spath:?}", f.path());
                                                     fs::copy(f.path(), &spath).unwrap();
                                                     *progress.lock() = format!("{show_path} OK");
@@ -901,7 +1024,8 @@ fn main() {
 
                                                 done += 1;
                                                 let tp = *typer_progress.lock();
-                                                *typer_progress.lock() = tp.max(done as f32 / count as f32);
+                                                *typer_progress.lock() =
+                                                    tp.max(done as f32 / count as f32);
                                             }
                                         }
                                     }
@@ -915,7 +1039,12 @@ fn main() {
                         galpha = 2.;
                         goner_alpha = galpha;
                         typer.start("AHORA.^^10\nSE REALIZARÁ LA CONVERSIÓN.");
-                    } else if patch_task.as_ref().map(|x| x.is_finished()).unwrap_or(false) && typer.is_finished() {
+                    } else if patch_task
+                        .as_ref()
+                        .map(|x| x.is_finished())
+                        .unwrap_or(false)
+                        && typer.is_finished()
+                    {
                         if galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                         } else {
@@ -924,14 +1053,16 @@ fn main() {
                             let mut success = false;
                             if let Some(pt) = patch_task.take() {
                                 if let Err(e) = pt.join() {
-                                    let mut f = BufWriter::new(File::create("patching_error.txt").unwrap());
+                                    let mut f =
+                                        BufWriter::new(File::create("patching_error.txt").unwrap());
                                     f.write_all(if let Some(s) = e.downcast_ref::<&str>() {
                                         s.as_bytes()
                                     } else if let Some(s) = e.downcast_ref::<String>() {
                                         s.as_bytes()
                                     } else {
                                         "???".as_bytes()
-                                    }).unwrap();
+                                    })
+                                    .unwrap();
                                     f.flush().unwrap();
                                 } else {
                                     success = true;
@@ -952,7 +1083,13 @@ fn main() {
                 PatcherState::PatchFailed => {
                     let mut go_lower = true;
                     if !typer.playing {
-                        goner = Some(d.load_texture_from_image(&thread, &Image::load_image_from_mem(".png", &files["error.png"]).unwrap()).unwrap());
+                        goner = Some(
+                            d.load_texture_from_image(
+                                &thread,
+                                &Image::load_image_from_mem(".png", &files["error.png"]).unwrap(),
+                            )
+                            .unwrap(),
+                        );
                         *typer_progress.lock() = 1.;
                         galpha = 2.;
                         typer.start("LA CONVERSIÓN^5 HA FALLADO.^^10\nASEGÚRATE^5 DE TENER LOS^^10\nARCHIVOS ORIGINALES.");
@@ -971,7 +1108,9 @@ fn main() {
 
                     if go_lower {
                         if pitch_another_him > 0.02 {
-                            pitch_another_him = (pitch_another_him - (0.02 * (d.get_frame_time() / (1. / 30.)))).max(0.02);
+                            pitch_another_him = (pitch_another_him
+                                - (0.02 * (d.get_frame_time() / (1. / 30.))))
+                                .max(0.02);
                         } else {
                             play_another_him = false;
                         }
@@ -980,7 +1119,9 @@ fn main() {
                             play_another_him = true;
                         }
                         if pitch_another_him < 0.96 {
-                            pitch_another_him = (pitch_another_him + (0.02 * (d.get_frame_time() / (1. / 30.)))).min(0.96);
+                            pitch_another_him = (pitch_another_him
+                                + (0.02 * (d.get_frame_time() / (1. / 30.))))
+                                .min(0.96);
                         }
                     }
                 }
@@ -1002,7 +1143,12 @@ fn main() {
                 PatcherState::EndTalkA => {
                     if !typer.playing {
                         galpha = 2.;
-                        typer.start(&format!("NOS VEMOS PRONTO^^10\n{}.", whoami::username().unwrap_or(String::from("JUGADOR")).to_uppercase()));
+                        typer.start(&format!(
+                            "NOS VEMOS PRONTO^^10\n{}.",
+                            whoami::username()
+                                .unwrap_or(String::from("JUGADOR"))
+                                .to_uppercase()
+                        ));
                     } else if typer.is_finished() {
                         if galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
@@ -1014,7 +1160,9 @@ fn main() {
                     }
 
                     if pitch_another_him > 0.02 {
-                        pitch_another_him = (pitch_another_him - (0.02 * (d.get_frame_time() / (1. / 30.)))).max(0.02);
+                        pitch_another_him = (pitch_another_him
+                            - (0.02 * (d.get_frame_time() / (1. / 30.))))
+                            .max(0.02);
                     } else {
                         play_another_him = false;
                     }
@@ -1105,12 +1253,13 @@ fn main() {
             } else if aud_another_him.is_playing() {
                 aud_another_him.stop();
             }
-            let mult  =
-            {
+            let mult = {
                 let cond;
                 #[cfg(not(feature = "uninstaller"))]
                 {
-                    cond = state >= PatcherState::StartTalkD && (state != PatcherState::PatchFailed || typer.is_finished()) && state < PatcherState::EndTalkA;
+                    cond = state >= PatcherState::StartTalkE
+                        && (state != PatcherState::PatchFailed || typer.is_finished())
+                        && state < PatcherState::EndTalkA;
                 }
                 #[cfg(feature = "uninstaller")]
                 {
@@ -1150,7 +1299,12 @@ fn main() {
             let alpha = (timer.elapsed().as_secs_f32() * 2.).sin() * 0.2 + 0.6;
             let fake_galpha = if skipping { 1. } else { galpha };
             //println!("galpha={fake_galpha:.2} falpha={falpha:.2} final={:.2}", fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
-            typer.draw(&fnt, &mut d, alpha, fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
+            typer.draw(
+                &fnt,
+                &mut d,
+                alpha,
+                fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.),
+            );
             {
                 let cond;
                 #[cfg(not(feature = "uninstaller"))]
@@ -1197,7 +1351,12 @@ fn main() {
                             usize::MAX,
                             alpha,
                             galpha.clamp(0., 1.),
-                            if i == qoption { Color::YELLOW } else { Color::WHITE }.alpha(qalpha)
+                            if i == qoption {
+                                Color::YELLOW
+                            } else {
+                                Color::WHITE
+                            }
+                            .alpha(qalpha),
                         );
                     }
                     if !qanswered {
@@ -1218,7 +1377,14 @@ fn main() {
             }
             #[cfg(not(feature = "uninstaller"))]
             if inst_alpha > 0. {
-                Typer::draw_text_half(&mut d, &fnt, Vector2::new(10., 10.), "Presiona [X/SHIFT] para ir más rápido.\nPresiona [C/CTRL] para saltar la intro.", alpha, inst_alpha);
+                Typer::draw_text_half(
+                    &mut d,
+                    &fnt,
+                    Vector2::new(10., 10.),
+                    "Presiona [X/SHIFT] para ir más rápido.\nPresiona [C/CTRL] para saltar la intro.",
+                    alpha,
+                    inst_alpha,
+                );
             }
             if let Some(goner) = goner.as_ref() {
                 let mut scale = 1.;
@@ -1226,17 +1392,13 @@ fn main() {
                     scale += 0.5;
                 }
                 let tp = *typer_progress.lock();
-                let src = Rectangle::new(
-                    0.,
-                    0.,
-                    goner.width as _,
-                    (goner.height as f32 * tp).floor()
-                );
+                let src =
+                    Rectangle::new(0., 0., goner.width as _, (goner.height as f32 * tp).floor());
                 let dest = Rectangle::new(
                     (320. - (goner.width as f32 * 0.5 * scale)).floor(),
                     (480. * (7. / 10.) - (goner.height as f32 * (0.5 * scale))).floor(),
                     (goner.width as f32 * scale).floor(),
-                    (goner.height as f32 * tp * scale).floor()
+                    (goner.height as f32 * tp * scale).floor(),
                 );
                 //println!("{scale}, {}, {}, {src:?}, {dest:?}", goner.width, goner.height);
                 d.draw_texture_pro(
@@ -1245,48 +1407,30 @@ fn main() {
                     dest,
                     Vector2::zero(),
                     0.,
-                    Color::WHITE.alpha(goner_alpha.clamp(0., 1.))
+                    Color::WHITE.alpha(goner_alpha.clamp(0., 1.)),
                 );
             }
             #[cfg(feature = "uninstaller")]
             if shown_friend {
                 d.draw_texture_pro(
                     &img_friend,
-                    Rectangle::new(
-                        0.,
-                        0.,
-                        img_friend.width as _,
-                        img_friend.height as _
-                    ),
+                    Rectangle::new(0., 0., img_friend.width as _, img_friend.height as _),
                     Rectangle::new(
                         320.,
                         240.,
                         img_friend.width as f32 * 2. * friend_scale,
-                        img_friend.height as f32 * 2. * friend_scale
+                        img_friend.height as f32 * 2. * friend_scale,
                     ),
                     Vector2::new(
                         img_friend.width as f32 * friend_scale,
-                        img_friend.height as f32 * friend_scale),
-                        0.,
-                        Color::WHITE
-                    );
+                        img_friend.height as f32 * friend_scale,
+                    ),
+                    0.,
+                    Color::WHITE,
+                );
                 friend_scale += delta;
             }
-        });
-        d.clear_background(Color::BLACK);
-        d.draw_texture_pro(
-            &render,
-            Rectangle::new(
-                0.,
-                0.,
-                render.texture.width as _,
-                -render.texture.height as _,
-            ),
-            Rectangle::new(0., 0., 640. * scale as f32, 480. * scale as f32),
-            Vector2::zero(),
-            0.,
-            Color::WHITE,
-        );
+        }
         //d.draw_fps(20, 20);
     }
 }

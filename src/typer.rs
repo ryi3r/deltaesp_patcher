@@ -56,7 +56,7 @@ impl Typer {
             Vector2::new(pos.x - 1., pos.y),
             16.,
             4.,
-            Color::WHITE.alpha(shadow_alpha * global_alpha),
+            Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -64,7 +64,7 @@ impl Typer {
             Vector2::new(pos.x + 1., pos.y),
             16.,
             4.,
-            Color::WHITE.alpha(shadow_alpha * global_alpha),
+            Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -72,7 +72,7 @@ impl Typer {
             Vector2::new(pos.x, pos.y - 1.),
             16.,
             4.,
-            Color::WHITE.alpha(shadow_alpha * global_alpha),
+            Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -80,7 +80,7 @@ impl Typer {
             Vector2::new(pos.x, pos.y + 1.),
             16.,
             4.,
-            Color::WHITE.alpha(shadow_alpha * global_alpha),
+            Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
 
         d.draw_text_ex(
@@ -89,7 +89,7 @@ impl Typer {
             Vector2::new(pos.x - 1., pos.y - 1.),
             16.,
             4.,
-            Color::WHITE.alpha(shadow_alpha * global_alpha / 2.),
+            Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -97,7 +97,7 @@ impl Typer {
             Vector2::new(pos.x + 1., pos.y - 1.),
             16.,
             4.,
-            Color::WHITE.alpha(shadow_alpha * global_alpha / 2.),
+            Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -105,7 +105,7 @@ impl Typer {
             Vector2::new(pos.x + 1., pos.y + 1.),
             16.,
             4.,
-            Color::WHITE.alpha(shadow_alpha * global_alpha / 2.),
+            Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -113,7 +113,7 @@ impl Typer {
             Vector2::new(pos.x - 1., pos.y + 1.),
             16.,
             4.,
-            Color::WHITE.alpha(shadow_alpha * global_alpha / 2.),
+            Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
 
         d.draw_text_ex(fnt, text, pos, 16., 4., Color::WHITE.alpha(global_alpha));
@@ -134,7 +134,7 @@ impl Typer {
             Vector2::new(pos.x - 2., pos.y),
             32.,
             8.,
-            tint.alpha((tint.a as f32 / 255.) * shadow_alpha * global_alpha),
+            tint.alpha(((tint.a as f32 / 255.) * shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -142,7 +142,7 @@ impl Typer {
             Vector2::new(pos.x + 2., pos.y),
             32.,
             8.,
-            tint.alpha((tint.a as f32 / 255.) * shadow_alpha * global_alpha),
+            tint.alpha(((tint.a as f32 / 255.) * shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -150,7 +150,7 @@ impl Typer {
             Vector2::new(pos.x, pos.y - 2.),
             32.,
             8.,
-            tint.alpha((tint.a as f32 / 255.) * shadow_alpha * global_alpha),
+            tint.alpha(((tint.a as f32 / 255.) * shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -158,7 +158,7 @@ impl Typer {
             Vector2::new(pos.x, pos.y + 2.),
             32.,
             8.,
-            tint.alpha((tint.a as f32 / 255.) * shadow_alpha * global_alpha),
+            tint.alpha(((tint.a as f32 / 255.) * shadow_alpha * global_alpha) / 3.),
         );
 
         d.draw_text_ex(
@@ -167,7 +167,7 @@ impl Typer {
             Vector2::new(pos.x - 2., pos.y - 2.),
             32.,
             8.,
-            tint.alpha((tint.a as f32 / 255.) * shadow_alpha * global_alpha / 2.),
+            tint.alpha(((tint.a as f32 / 255.) * shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -175,7 +175,7 @@ impl Typer {
             Vector2::new(pos.x + 2., pos.y - 2.),
             32.,
             8.,
-            tint.alpha((tint.a as f32 / 255.) * shadow_alpha * global_alpha / 2.),
+            tint.alpha(((tint.a as f32 / 255.) * shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -183,7 +183,7 @@ impl Typer {
             Vector2::new(pos.x + 2., pos.y + 2.),
             32.,
             8.,
-            tint.alpha((tint.a as f32 / 255.) * shadow_alpha * global_alpha / 2.),
+            tint.alpha(((tint.a as f32 / 255.) * shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
             fnt,
@@ -191,7 +191,7 @@ impl Typer {
             Vector2::new(pos.x - 2., pos.y + 2.),
             32.,
             8.,
-            tint.alpha((tint.a as f32 / 255.) * shadow_alpha * global_alpha / 2.),
+            tint.alpha(((tint.a as f32 / 255.) * shadow_alpha * global_alpha) / 3.),
         );
 
         d.draw_text_ex(
