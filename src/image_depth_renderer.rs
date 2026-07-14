@@ -29,7 +29,7 @@ impl Default for ImageDepthRenderer {
 }
 
 impl ImageDepthRenderer {
-    pub fn draw(&mut self, tex: &Texture2D, d: &mut RaylibDrawHandle, mult: f32) -> bool {
+    pub fn draw(&mut self, tex: &Option<Texture2D>, d: &mut RaylibDrawHandle, mult: f32) -> bool {
         let ft = d.get_frame_time() / (1. / 30.);
         self.time += ft;
         if self.speed > 0. {
@@ -45,43 +45,45 @@ impl ImageDepthRenderer {
         if self.time > 2. {
             let a = (0.2 + self.alpha1 - self.alpha2 + self.alpha3).clamp(0., 1.);
             //println!("a:{a:.3}");
-            if a <= 0.01 {
+            if a <= 0.03 {
                 return true;
             }
-            let (w, h) = (tex.width * 3, tex.height * 3);
-            let dest = Rectangle::new(320., 240., w as f32 * self.scale, h as f32 * self.scale);
-            d.draw_texture_pro(
-                tex,
-                Rectangle::new(0., 0., tex.width as _, tex.height as _),
-                dest,
-                Vector2::zero(),
-                0.,
-                Color::WHITE.alpha(a),
-            );
-            d.draw_texture_pro(
-                tex,
-                Rectangle::new(0., 0., -tex.width as _, tex.height as _),
-                dest,
-                Vector2::new(w as f32 * self.scale, 0.),
-                0.,
-                Color::WHITE.alpha(a),
-            );
-            d.draw_texture_pro(
-                tex,
-                Rectangle::new(0., 0., -tex.width as _, -tex.height as _),
-                dest,
-                Vector2::new(w as f32 * self.scale, h as f32 * self.scale),
-                0.,
-                Color::WHITE.alpha(a),
-            );
-            d.draw_texture_pro(
-                tex,
-                Rectangle::new(0., 0., tex.width as _, -tex.height as _),
-                dest,
-                Vector2::new(0., h as f32 * self.scale),
-                0.,
-                Color::WHITE.alpha(a),
-            );
+            if let Some(tex) = tex {
+                let (w, h) = (tex.width * 3, tex.height * 3);
+                let dest = Rectangle::new(320., 240., w as f32 * self.scale, h as f32 * self.scale);
+                d.draw_texture_pro(
+                    tex,
+                    Rectangle::new(0., 0., tex.width as _, tex.height as _),
+                    dest,
+                    Vector2::zero(),
+                    0.,
+                    Color::WHITE.alpha(a),
+                );
+                d.draw_texture_pro(
+                    tex,
+                    Rectangle::new(0., 0., -tex.width as _, tex.height as _),
+                    dest,
+                    Vector2::new(w as f32 * self.scale, 0.),
+                    0.,
+                    Color::WHITE.alpha(a),
+                );
+                d.draw_texture_pro(
+                    tex,
+                    Rectangle::new(0., 0., -tex.width as _, -tex.height as _),
+                    dest,
+                    Vector2::new(w as f32 * self.scale, h as f32 * self.scale),
+                    0.,
+                    Color::WHITE.alpha(a),
+                );
+                d.draw_texture_pro(
+                    tex,
+                    Rectangle::new(0., 0., tex.width as _, -tex.height as _),
+                    dest,
+                    Vector2::new(0., h as f32 * self.scale),
+                    0.,
+                    Color::WHITE.alpha(a),
+                );
+            }
         }
 
         false

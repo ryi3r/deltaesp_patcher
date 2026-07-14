@@ -12,29 +12,19 @@ const TARGET_CHAR_TIME: f32 = 4. / 30.;
 const NEW_LINE: char = '\n';
 
 pub struct Typer {
-    timer: Instant,
+    pub timer: Instant,
+
     pub text: String,
     pub pos: Vector2,
     pub playing: bool,
-    chars: usize,
-    delay: HashMap<usize, usize>,
+
+    pub chars: usize,
+    pub delay: HashMap<usize, usize>,
+
     pub instant_show: bool,
     pub increase_typer: bool,
-}
 
-impl Default for Typer {
-    fn default() -> Self {
-        Self {
-            timer: Instant::now(),
-            text: String::new(),
-            pos: Vector2::zero(),
-            playing: false,
-            chars: 0,
-            delay: HashMap::new(),
-            instant_show: false,
-            increase_typer: true,
-        }
-    }
+    pub fnt: Font,
 }
 
 impl Typer {
@@ -43,15 +33,15 @@ impl Typer {
     }
 
     pub fn draw_text_half(
+        &self,
         d: &mut RaylibDrawHandle,
-        fnt: &Font,
         pos: Vector2,
         text: &str,
         shadow_alpha: f32,
         global_alpha: f32,
     ) {
         d.draw_text_ex(
-            fnt,
+            &self.fnt,
             text,
             Vector2::new(pos.x - 1., pos.y),
             16.,
@@ -59,7 +49,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            fnt,
+            &self.fnt,
             text,
             Vector2::new(pos.x + 1., pos.y),
             16.,
@@ -67,7 +57,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            fnt,
+            &self.fnt,
             text,
             Vector2::new(pos.x, pos.y - 1.),
             16.,
@@ -75,7 +65,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            fnt,
+            &self.fnt,
             text,
             Vector2::new(pos.x, pos.y + 1.),
             16.,
@@ -84,7 +74,7 @@ impl Typer {
         );
 
         d.draw_text_ex(
-            fnt,
+            &self.fnt,
             text,
             Vector2::new(pos.x - 1., pos.y - 1.),
             16.,
@@ -92,7 +82,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            fnt,
+            &self.fnt,
             text,
             Vector2::new(pos.x + 1., pos.y - 1.),
             16.,
@@ -100,7 +90,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            fnt,
+            &self.fnt,
             text,
             Vector2::new(pos.x + 1., pos.y + 1.),
             16.,
@@ -108,7 +98,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            fnt,
+            &self.fnt,
             text,
             Vector2::new(pos.x - 1., pos.y + 1.),
             16.,
@@ -116,7 +106,14 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
 
-        d.draw_text_ex(fnt, text, pos, 16., 4., Color::WHITE.alpha(global_alpha));
+        d.draw_text_ex(
+            &self.fnt,
+            text,
+            pos,
+            16.,
+            4.,
+            Color::WHITE.alpha(global_alpha),
+        );
     }
 
     pub fn draw_text(
@@ -206,8 +203,8 @@ impl Typer {
 
     #[allow(clippy::too_many_arguments)]
     pub fn draw_text_centered_part(
+        &self,
         d: &mut RaylibDrawHandle,
-        fnt: &Font,
         pos: Vector2,
         text: &str,
         offset: usize,
@@ -215,14 +212,14 @@ impl Typer {
         global_alpha: f32,
         tint: Color,
     ) {
-        let nl_y = fnt.measure_text(&NEW_LINE.to_string(), 32., 8.).y / 2.;
+        let nl_y = self.fnt.measure_text(&NEW_LINE.to_string(), 32., 8.).y / 2.;
         let mut c = 0;
         for (i, s) in text.split(NEW_LINE).enumerate() {
-            let s_x = fnt.measure_text(s, 32., 8.).x / 2.;
+            let s_x = self.fnt.measure_text(s, 32., 8.).x / 2.;
             if c + s.len() >= offset {
                 Self::draw_text(
                     d,
-                    fnt,
+                    &self.fnt,
                     Vector2::new(
                         (pos.x - s_x).floor(),
                         (pos.y + (i as f32 * 8.)).floor() + (nl_y * i as f32),
@@ -236,7 +233,7 @@ impl Typer {
             }
             Self::draw_text(
                 d,
-                fnt,
+                &self.fnt,
                 Vector2::new(
                     (pos.x - s_x).floor(),
                     (pos.y + (i as f32 * 8.)).floor() + (nl_y * i as f32),
@@ -251,22 +248,21 @@ impl Typer {
     }
 
     pub fn draw_text_centered_half_part(
+        &self,
         d: &mut RaylibDrawHandle,
-        fnt: &Font,
         pos: Vector2,
         text: &str,
         offset: usize,
         shadow_alpha: f32,
         global_alpha: f32,
     ) {
-        let nl_y = fnt.measure_text(&NEW_LINE.to_string(), 16., 4.).y / 2.;
+        let nl_y = self.fnt.measure_text(&NEW_LINE.to_string(), 16., 4.).y / 2.;
         let mut c = 0;
         for (i, s) in text.split(NEW_LINE).enumerate() {
-            let s_x = fnt.measure_text(s, 16., 4.).x / 2.;
+            let s_x = self.fnt.measure_text(s, 16., 4.).x / 2.;
             if c + s.len() >= offset {
-                Self::draw_text_half(
+                self.draw_text_half(
                     d,
-                    fnt,
                     Vector2::new(
                         (pos.x - s_x).floor(),
                         (pos.y + (i as f32 * 8.)).floor() + (nl_y * i as f32),
@@ -277,9 +273,8 @@ impl Typer {
                 );
                 break;
             }
-            Self::draw_text_half(
+            self.draw_text_half(
                 d,
-                fnt,
                 Vector2::new(
                     (pos.x - s_x).floor(),
                     (pos.y + (i as f32 * 8.)).floor() + (nl_y * i as f32),
@@ -346,13 +341,7 @@ impl Typer {
         self.playing && self.chars > self.text.len()
     }
 
-    pub fn draw(
-        &mut self,
-        fnt: &Font,
-        d: &mut RaylibDrawHandle,
-        shadow_alpha: f32,
-        global_alpha: f32,
-    ) {
+    pub fn draw(&mut self, d: &mut RaylibDrawHandle, shadow_alpha: f32, global_alpha: f32) {
         let is_skip_pressed = d.is_key_down(KeyboardKey::KEY_X)
             || d.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
             || d.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
@@ -381,9 +370,8 @@ impl Typer {
                 self.chars += 1;
             }
         }
-        Self::draw_text_centered_part(
+        self.draw_text_centered_part(
             d,
-            fnt,
             self.pos,
             &self.text,
             self.chars,
