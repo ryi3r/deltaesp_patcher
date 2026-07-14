@@ -1,6 +1,6 @@
 [package]
 name = "deltaesp_patcher"
-version = "1.0.15"
+version = "1.0.16"
 edition = "2024"
 authors = ["ryi3r <itsryi3r@gmail.com>"]
 
@@ -9,7 +9,7 @@ uninstaller = []
 #default = ["uninstaller"]
 
 [dependencies]
-sola-raylib = { git = "https://github.com/ryi3r/sola-raylib.git", branch = "main", features = [
+sola-raylib = { git = "https://github.com/brettchalupa/sola-raylib.git", branch = "main", features = [
     #"wayland",
     "opengl_21",
     #"software_render",
@@ -21,7 +21,9 @@ serde = "1.0.228"
 steamlocate = "2.1.0"
 rand = "0.10.2"
 parking_lot = "0.12.5"
-oxidelta = { git = "https://github.com/sockudo/oxidelta.git" }
+oxidelta = { git = "https://github.com/sockudo/oxidelta.git", features = [
+    "parallel",
+] }
 whoami = "2.1.2"
 
 [build-dependencies]

@@ -36,44 +36,217 @@ pub mod image_depth_renderer;
 pub mod image_soul_blur_renderer;
 pub mod typer;
 
-fn ensure_deltarune_in_folder(pb: &Path) -> bool {
-    let paths = [
-        vec!["DELTARUNE.exe"],
-        vec!["data.win"],
-        vec!["chapter1_windows", "data.win"],
-        vec!["chapter2_windows", "data.win"],
-        vec!["chapter3_windows", "data.win"],
-        vec!["chapter4_windows", "data.win"],
-    ];
-    for path in paths {
-        let mut npb = pb.to_path_buf();
-        for p in path {
-            npb.push(p);
-        }
-        if !npb.exists() || !npb.is_file() {
-            println!("not found: {npb:?}->{pb:?}");
-            return false;
-        }
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub enum DeltaruneOsKind {
+    #[default]
+    Windows,
+    Mac,
+    Switch,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeltarunePath {
+    pub path: PathBuf,
+    pub os: DeltaruneOsKind,
+}
+
+fn transform_deltarune_path(pb: &Path) -> Option<DeltarunePath> {
+    let mut drp = DeltarunePath {
+        path: pb.to_path_buf(),
+        os: DeltaruneOsKind::default(),
+    };
+    if drp.path.is_file() {
+        drp.path.pop(); // DELTARUNE.exe (and other) -> folder path
     }
-    if cfg!(feature = "uninstaller") {
-        let mut walk = vec![pb.to_path_buf()];
-        let mut count = 0usize;
-        while let Some(w) = walk.pop() {
-            if let Ok(fd) = fs::read_dir(w) {
-                for f in fd.flatten() {
-                    if let Some(ext) = f.path().extension()
-                        && ext == "bak"
-                    {
-                        count += 1;
-                    }
-                }
+    if !drp.path.is_dir() {
+        println!("{:?} isn't a directory?", drp.path);
+    }
+    {
+        let dir = drp.path.file_name().unwrap().to_string_lossy();
+        if dir == "mus"
+            || dir == "English.lproj" || dir == "__MACOSX" // mac only
+            // likely a chapter path, will work for fake paths like: chapter1AAAAA_mac, this will get rectified later on
+            || (dir.starts_with("chapter")
+                && (dir.ends_with("_mac") || dir.ends_with("_windows") || dir.ends_with("_switch"))
+                && dir
+                    .chars()
+                    .nth("chapter".chars().count())
+                    .map(|x| x.is_ascii_digit())
+                    .unwrap_or(false))
+        {
+            if dir.ends_with("_mac") {
+                drp.os = DeltaruneOsKind::Mac;
+            } else if dir.ends_with("_switch") {
+                drp.os = DeltaruneOsKind::Switch;
             }
-        }
-        if count == 0 {
-            return false;
+            drp.path.pop();
         }
     }
-    true
+    // switch check!
+    {
+        let mut p = drp.path.clone();
+        p.push("game.win");
+        if p.exists() && p.is_file() {
+            drp.os = DeltaruneOsKind::Switch;
+        }
+        p.pop();
+        p.push("chapter1_switch");
+        if p.exists() && p.is_dir() {
+            drp.os = DeltaruneOsKind::Switch;
+        }
+        p.pop();
+        p.push("preselected_user");
+        if p.exists() && p.is_dir() {
+            drp.os = DeltaruneOsKind::Switch;
+        }
+        p.pop();
+    }
+    // mac check!
+    {
+        let mut p = drp.path.clone();
+        p.push("__MACOSX");
+        if p.exists() && p.is_dir() {
+            drp.os = DeltaruneOsKind::Mac;
+        }
+        p.pop();
+        p.push("DELTARUNE.app");
+        if p.exists() && p.is_dir() {
+            drp.os = DeltaruneOsKind::Mac;
+            drp.path = p.clone();
+        } else {
+            p.pop();
+        }
+        p.push("Contents");
+        if p.exists() && p.is_dir() {
+            drp.os = DeltaruneOsKind::Mac;
+            drp.path = p.clone();
+        } else {
+            p.pop();
+        }
+        p.push("MacOS");
+        if p.exists() && p.is_dir() {
+            drp.os = DeltaruneOsKind::Mac;
+        }
+        p.pop();
+        p.push("Resources");
+        if p.exists() && p.is_dir() {
+            drp.os = DeltaruneOsKind::Mac;
+            drp.path = p.clone();
+        } else {
+            p.pop();
+        }
+        p.push("English.lproj");
+        if p.exists() && p.is_dir() {
+            drp.os = DeltaruneOsKind::Mac;
+        }
+        p.pop();
+        p.push("game.ios");
+        if p.exists() && p.is_file() {
+            drp.os = DeltaruneOsKind::Mac;
+        }
+    }
+    // target folder ACTUALLY has deltarune?
+    {
+        let folder_check = match drp.os {
+            DeltaruneOsKind::Windows => "windows",
+            DeltaruneOsKind::Mac => "mac",
+            DeltaruneOsKind::Switch => "switch",
+        };
+        let mut p = drp.path.clone();
+        for ch in 0..=5 {
+            if ch != 0 {
+                p.push(format!("chapter{ch}_{folder_check}"));
+            }
+            if p.exists() && p.is_dir() {
+                p.push(match drp.os {
+                    DeltaruneOsKind::Windows => "data.win",
+                    DeltaruneOsKind::Mac => "game.ios",
+                    DeltaruneOsKind::Switch => "game.win",
+                });
+                if cfg!(feature = "uninstaller") && !p.add_extension(".bak") {
+                    println!("failed to add extension to file??");
+                    return None; // what?
+                }
+                if p.exists() && p.is_file() {
+                    p.pop();
+                } else {
+                    return None;
+                }
+                if ch != 0 {
+                    p.pop();
+                }
+                continue;
+            }
+            return None;
+        }
+        p.push("mus");
+        if p.exists() && p.is_dir() {
+            p.pop(); // maybe do other checks?
+        } else {
+            return None;
+        }
+    }
+    Some(drp)
+}
+
+#[test]
+fn test_win_path() {
+    use std::str::FromStr;
+
+    let mut p = PathBuf::from_str("/home/ryi3r/Desktop/DELTARUNE WIN BAK/").unwrap();
+    let drp = transform_deltarune_path(&p).unwrap();
+    assert_eq!(drp.os, DeltaruneOsKind::Windows);
+    assert_eq!(drp.path, p);
+
+    p.push("chapter5_windows");
+    let drp = transform_deltarune_path(&p.clone()).unwrap();
+    p.pop();
+    assert_eq!(drp.os, DeltaruneOsKind::Windows);
+    assert_eq!(drp.path, p);
+
+    p.push("mus");
+    let drp = transform_deltarune_path(&p.clone()).unwrap();
+    p.pop();
+    assert_eq!(drp.os, DeltaruneOsKind::Windows);
+    assert_eq!(drp.path, p);
+
+    p.push("DELTARUNE.exe");
+    let drp = transform_deltarune_path(&p.clone()).unwrap();
+    p.pop();
+    assert_eq!(drp.os, DeltaruneOsKind::Windows);
+    assert_eq!(drp.path, p);
+}
+
+#[test]
+fn test_mac_path() {
+    use std::str::FromStr;
+
+    let mut p = PathBuf::from_str("/home/ryi3r/Desktop/DELTARUNE MAC BAK/").unwrap();
+    let base_p = p.clone();
+    let drp = transform_deltarune_path(&p.clone()).unwrap(); // triggers all path changes
+    assert_eq!(drp.os, DeltaruneOsKind::Mac);
+    p.push("DELTARUNE.app/Contents/Resources/");
+    assert_eq!(drp.path, p);
+
+    p = base_p;
+    p.push("__MACOSX");
+    let drp = transform_deltarune_path(&p.clone()).unwrap();
+    assert_eq!(drp.os, DeltaruneOsKind::Mac);
+    p.pop();
+    p.push("DELTARUNE.app/Contents/Resources/");
+    assert_eq!(drp.path, p);
+
+    p.push("mus");
+    let drp = transform_deltarune_path(&p.clone()).unwrap();
+    p.pop();
+    assert_eq!(drp.os, DeltaruneOsKind::Mac);
+    assert_eq!(drp.path, p);
+
+    p.push("game.ios");
+    let drp = transform_deltarune_path(&p.clone()).unwrap();
+    p.pop();
+    assert_eq!(drp.os, DeltaruneOsKind::Mac);
+    assert_eq!(drp.path, p);
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -195,13 +368,14 @@ fn main() {
 
     let typer_progress = Arc::new(Mutex::new(0f32));
     let progress = Arc::new(Mutex::new(String::new()));
-    let folder = Arc::new(Mutex::new(PathBuf::new()));
+    let deltarune_path = Arc::new(Mutex::new(None));
+    let mut folder = PathBuf::new();
 
     if let Ok(sl) = steamlocate::locate_all() {
         for lib in sl {
             if let Ok(Some(a)) = lib.find_app(1_671_210) {
                 // deltarune's steam id
-                *folder.lock() = a.1.resolve_app_dir(&a.0);
+                folder = a.1.resolve_app_dir(&a.0);
                 println!("UPDATE FOLDER");
             }
         }
@@ -387,11 +561,12 @@ fn main() {
                             }
                             #[cfg(feature = "uninstaller")]
                             {
-                                let mut fl = folder.lock();
-                                state = if ensure_deltarune_in_folder(&fl) {
+                                state = if let Some(drp) = transform_deltarune_path(&folder) {
+                                    *deltarune_path.lock() = Some(drp);
                                     PatcherState::UninstallPrompt
                                 } else {
-                                    *fl = PathBuf::new();
+                                    folder.clear();
+                                    deltarune_path.lock().take();
                                     println!("CLEAR FOLDER (2)");
                                     PatcherState::FindFolder
                                 }
@@ -507,12 +682,13 @@ fn main() {
                                 galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                             } else {
                                 typer.stop();
-                                let mut fl = folder.lock();
-                                state = if qoption == 0 && ensure_deltarune_in_folder(&fl) {
+                                state = if qoption == 0
+                                    && let Some(mp) = transform_deltarune_path(&folder)
+                                {
+                                    *deltarune_path.lock() = Some(mp);
                                     PatcherState::Patch
                                 } else {
                                     println!("CLEAR FOLDER (1)");
-                                    *fl = PathBuf::new();
                                     PatcherState::RefuseStartPatch
                                 };
                             }
@@ -534,6 +710,7 @@ fn main() {
                     }
                 }
                 PatcherState::FindFolder => {
+                    let mut lock = deltarune_path.lock();
                     if d.is_file_dropped() {
                         for f in d.load_dropped_files().paths() {
                             if f.is_empty() {
@@ -541,11 +718,12 @@ fn main() {
                             }
                             let f = PathBuf::from(f);
                             if f.exists() {
-                                if f.is_file() {
-                                    *folder.lock() = f.parent().unwrap().to_path_buf();
-                                } else if f.is_dir() {
-                                    *folder.lock() = f;
-                                }
+                                *lock = transform_deltarune_path(&f)
+                                    .unwrap_or(DeltarunePath {
+                                        path: PathBuf::new(),
+                                        os: DeltaruneOsKind::default(),
+                                    })
+                                    .into();
                                 println!("UPDATE FOLDER");
                             }
                         }
@@ -554,12 +732,14 @@ fn main() {
                         galpha = 2.;
                         typer.pos.y = 100.;
                         typer.start("ARRASTRA LA CARPETA\nDE DELTARUNE^^10\nA ESTA VENTANA.");
-                    } else if typer.is_finished() && !folder.lock().as_os_str().is_empty() {
+                    } else if typer.is_finished()
+                        && let Some(data) = lock.as_ref()
+                    {
                         if galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                         } else {
                             typer.stop();
-                            state = if ensure_deltarune_in_folder(&folder.lock()) {
+                            state = if !data.path.is_empty() {
                                 PatcherState::DeltaruneFound
                             } else {
                                 PatcherState::DeltaruneNotFound
@@ -568,7 +748,7 @@ fn main() {
                     }
                 }
                 PatcherState::DeltaruneNotFound => {
-                    *folder.lock() = PathBuf::new();
+                    deltarune_path.lock().take();
                     if !typer.playing {
                         galpha = 2.;
                         typer.start("DELTARUNE^^10\nNO FUE ENCONTRADO.");
@@ -627,11 +807,10 @@ fn main() {
                                 galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                             } else {
                                 typer.stop();
-                                let mut fl = folder.lock();
                                 state = if qoption == 0 {
                                     PatcherState::Uninstalling
                                 } else {
-                                    *fl = PathBuf::new();
+                                    deltarune_path.lock().take();
                                     PatcherState::EndKeptTalkA
                                 };
                             }
@@ -645,10 +824,11 @@ fn main() {
                         *progress.lock() = String::new();
                         {
                             let progress = progress.clone();
-                            let folder = folder.clone();
+                            let deltarune_path = deltarune_path.lock().clone();
                             let typer_progress = typer_progress.clone();
                             patch_task = Some(std::thread::spawn(move || {
                                 *progress.lock() = "Desinstalando parche...".into();
+                                let deltarune_path = deltarune_path.unwrap(); // just in case do it here lol
                                 let init_path = std::env::current_dir().unwrap();
                                 let mut dirs = vec![init_path.clone()];
                                 dirs[0].push("patch");
@@ -686,74 +866,75 @@ fn main() {
                                     let _ = fs::create_dir_all(&dir);
                                     if let Ok(d) = fs::read_dir(&dir) {
                                         for f in d.flatten() {
-                                            if let Ok(ft) = f.file_type()
-                                                && ft.is_file()
-                                            {
-                                                let mut show_path = f
-                                                    .path()
-                                                    .components()
-                                                    .skip(comp_count)
-                                                    .collect::<PathBuf>()
-                                                    .to_string_lossy()
-                                                    .to_string()
-                                                    .replace(".xdelta", "");
-                                                println!("processing: {show_path}");
-                                                if show_path.len() > 20 {
-                                                    show_path = show_path[(show_path.len() - 20)..]
-                                                        .to_string();
-                                                    let mut idx = show_path.find('/');
-                                                    if idx.is_none() {
-                                                        idx = show_path.find('\\');
-                                                    }
-                                                    if let Some(idx) = idx {
-                                                        show_path = show_path[idx..].to_string();
-                                                    }
-                                                    show_path = String::from("...") + &show_path;
-                                                }
-
-                                                *progress.lock() =
-                                                    format!("Procesando {show_path}...");
-                                                let mut spath = folder.lock().clone();
-                                                spath.extend(
-                                                    {
-                                                        let p = f.path();
-                                                        if let Some(ext) = p.extension()
-                                                            && ext == "xdelta"
-                                                        {
-                                                            p.with_extension("")
-                                                        } else {
-                                                            p
-                                                        }
-                                                    }
-                                                    .components()
-                                                    .skip(comp_count),
-                                                );
-                                                let bpath = spath.with_added_extension("bak");
-                                                if bpath.exists() && bpath.is_file() {
-                                                    if fs::metadata(&bpath).unwrap().len() > 0 {
-                                                        if let Ok(patched) = decoder::decode_all(
-                                                            &fs::read(&spath).unwrap(),
-                                                            &fs::read(&bpath).unwrap(),
-                                                        ) {
-                                                            fs::write(spath, &patched).unwrap();
-                                                        } else {
-                                                            println!(
-                                                                "unable to apply backup patch! was it an update?"
-                                                            );
-                                                        }
-                                                        //fs::copy(&bpath, &spath).unwrap();
-                                                    } else {
-                                                        fs::remove_file(&spath).unwrap();
-                                                    }
-                                                    fs::remove_file(&bpath).unwrap();
-                                                    //println!("spath:{spath:?},bpath:{bpath:?}");
-                                                }
-
-                                                done += 1;
-                                                let tp = *typer_progress.lock();
-                                                *typer_progress.lock() =
-                                                    tp.max(done as f32 / count as f32);
+                                            let Ok(ft) = f.file_type() else {
+                                                continue;
+                                            };
+                                            if !ft.is_file() {
+                                                continue;
                                             }
+                                            let mut show_path = f
+                                                .path()
+                                                .components()
+                                                .skip(comp_count)
+                                                .collect::<PathBuf>()
+                                                .to_string_lossy()
+                                                .to_string()
+                                                .replace(".xdelta", "");
+                                            println!("processing: {show_path}");
+                                            if show_path.len() > 20 {
+                                                show_path =
+                                                    show_path[(show_path.len() - 20)..].to_string();
+                                                let mut idx = show_path.find('/');
+                                                if idx.is_none() {
+                                                    idx = show_path.find('\\');
+                                                }
+                                                if let Some(idx) = idx {
+                                                    show_path = show_path[idx..].to_string();
+                                                }
+                                                show_path = String::from("...") + &show_path;
+                                            }
+
+                                            *progress.lock() = format!("Procesando {show_path}...");
+                                            let mut spath = deltarune_path.path.clone();
+                                            spath.extend(
+                                                {
+                                                    let p = f.path();
+                                                    if let Some(ext) = p.extension()
+                                                        && ext == "xdelta"
+                                                    {
+                                                        p.with_extension("")
+                                                    } else {
+                                                        p
+                                                    }
+                                                }
+                                                .components()
+                                                .skip(comp_count),
+                                            );
+                                            let bpath = spath.with_added_extension("bak");
+                                            if bpath.exists() && bpath.is_file() {
+                                                if fs::metadata(&bpath).unwrap().len() > 0 {
+                                                    if let Ok(patched) = decoder::decode_all(
+                                                        &fs::read(&spath).unwrap(),
+                                                        &fs::read(&bpath).unwrap(),
+                                                    ) {
+                                                        fs::write(spath, &patched).unwrap();
+                                                    } else {
+                                                        println!(
+                                                            "unable to apply backup patch! was it an update?"
+                                                        );
+                                                    }
+                                                    //fs::copy(&bpath, &spath).unwrap();
+                                                } else {
+                                                    fs::remove_file(&spath).unwrap();
+                                                }
+                                                fs::remove_file(&bpath).unwrap();
+                                                //println!("spath:{spath:?},bpath:{bpath:?}");
+                                            }
+
+                                            done += 1;
+                                            let tp = *typer_progress.lock();
+                                            *typer_progress.lock() =
+                                                tp.max(done as f32 / count as f32);
                                         }
                                     }
                                 }
@@ -820,10 +1001,11 @@ fn main() {
                         *progress.lock() = String::new();
                         {
                             let progress = progress.clone();
-                            let folder = folder.clone();
+                            let deltarune_path = deltarune_path.lock().clone();
                             let typer_progress = typer_progress.clone();
                             patch_task = Some(std::thread::spawn(move || {
                                 *progress.lock() = "Inicializando parche...".into();
+                                let deltarune_path = deltarune_path.unwrap(); // just in case do it here lol
                                 let init_path = std::env::current_dir().unwrap();
                                 let mut dirs = vec![init_path.clone()];
                                 dirs[0].push("patch");
@@ -834,13 +1016,21 @@ fn main() {
                                     while let Some(dir) = dirs.pop() {
                                         if let Ok(d) = fs::read_dir(dir) {
                                             for f in d.flatten() {
-                                                if let Ok(ft) = f.file_type()
-                                                    && ft.is_dir()
-                                                {
-                                                    dirs.push(f.path());
-                                                } else {
-                                                    count += 1;
+                                                let Ok(ft) = f.file_type() else {
+                                                    continue;
+                                                };
+                                                if ft.is_dir() {
+                                                    let dir = f.path();
+                                                    let fname = dir
+                                                        .file_name()
+                                                        .unwrap_or_default()
+                                                        .to_string_lossy();
+                                                    if fname != "mac" && fname != "switch" {
+                                                        dirs.push(dir);
+                                                    }
+                                                    continue;
                                                 }
+                                                count += 1;
                                             }
                                         }
                                     }
@@ -850,10 +1040,14 @@ fn main() {
                                 while let Some(dir) = dirs.pop() {
                                     if let Ok(d) = fs::read_dir(&dir) {
                                         for f in d.flatten() {
-                                            if let Ok(ft) = f.file_type()
-                                                && ft.is_dir()
-                                            {
-                                                dirs.push(f.path());
+                                            let Ok(ft) = f.file_type() else {
+                                                continue;
+                                            };
+                                            let p = f.path();
+                                            let fname =
+                                                p.file_name().unwrap_or_default().to_string_lossy();
+                                            if ft.is_dir() && fname != "mac" && fname != "switch" {
+                                                dirs.push(p);
                                             }
                                         }
                                     }
@@ -861,172 +1055,249 @@ fn main() {
                                     let _ = fs::create_dir_all(&dir);
                                     if let Ok(d) = fs::read_dir(&dir) {
                                         for f in d.flatten() {
-                                            if let Ok(ft) = f.file_type()
-                                                && ft.is_file()
-                                            {
-                                                let mut show_path = f
-                                                    .path()
-                                                    .components()
-                                                    .skip(comp_count)
-                                                    .collect::<PathBuf>()
-                                                    .to_string_lossy()
-                                                    .to_string()
-                                                    .replace(".xdelta", "");
-                                                println!("processing: {show_path}");
-                                                if show_path.len() > 20 {
-                                                    show_path = show_path[(show_path.len() - 20)..]
-                                                        .to_string();
-                                                    let mut idx = show_path.find('/');
-                                                    if idx.is_none() {
-                                                        idx = show_path.find('\\');
-                                                    }
-                                                    if let Some(idx) = idx {
-                                                        show_path = show_path[idx..].to_string();
-                                                    }
-                                                    show_path = String::from("...") + &show_path;
+                                            let Ok(ft) = f.file_type() else {
+                                                continue;
+                                            };
+                                            if !ft.is_file() {
+                                                continue;
+                                            }
+                                            let mut show_path = f
+                                                .path()
+                                                .components()
+                                                .skip(comp_count)
+                                                .collect::<PathBuf>()
+                                                .to_string_lossy()
+                                                .to_string()
+                                                .replace(".xdelta", "");
+                                            println!("processing: {show_path}");
+                                            if show_path.len() > 20 {
+                                                show_path =
+                                                    show_path[(show_path.len() - 20)..].to_string();
+                                                let mut idx = show_path.find('/');
+                                                if idx.is_none() {
+                                                    idx = show_path.find('\\');
                                                 }
+                                                if let Some(idx) = idx {
+                                                    show_path = show_path[idx..].to_string();
+                                                }
+                                                show_path = String::from("...") + &show_path;
+                                            }
+                                            *progress.lock() = format!("Procesando {show_path}...");
 
-                                                *progress.lock() =
-                                                    format!("Procesando {show_path}...");
-                                                let is_xdelta = f
-                                                    .path()
-                                                    .extension()
-                                                    .map(|ext| ext == "xdelta")
-                                                    .unwrap_or(false);
-                                                let mut spath = folder.lock().clone();
-                                                spath.extend(
+                                            let is_xdelta = f
+                                                .path()
+                                                .extension()
+                                                .map(|ext| ext == "xdelta")
+                                                .unwrap_or(false);
+                                            let mut spath = deltarune_path.path.clone();
+                                            let mut mac_patch = None;
+                                            {
+                                                let mut p = f.path();
+                                                let diff = p.parent().unwrap().components().count()
+                                                    - comp_count;
+                                                let os_suffix = match deltarune_path.os {
+                                                    DeltaruneOsKind::Windows => "windows",
+                                                    DeltaruneOsKind::Mac => "mac",
+                                                    DeltaruneOsKind::Switch => "switch",
+                                                };
+                                                if diff == 0 && is_xdelta {
+                                                    let fpr =
+                                                        p.file_prefix().unwrap().to_str().unwrap();
+                                                    let game_data_target = match deltarune_path.os {
+                                                        DeltaruneOsKind::Windows => "data.win",
+                                                        DeltaruneOsKind::Mac => "game.ios",
+                                                        DeltaruneOsKind::Switch => "game.win",
+                                                    };
+                                                    let mut valid = true;
+                                                    if fpr == "launcher" {
+                                                        spath.push(game_data_target);
+                                                    } else if fpr.len() == ("chapter".len() + 1)
+                                                        && fpr.starts_with("chapter")
+                                                        && let Some(ch) =
+                                                            fpr.chars().nth("chapter".len())
+                                                        && ch.is_ascii_digit()
                                                     {
-                                                        let p = f.path();
-                                                        if is_xdelta {
-                                                            p.with_extension("")
-                                                        } else {
-                                                            p
-                                                        }
-                                                    }
-                                                    .components()
-                                                    .skip(comp_count),
-                                                );
-                                                let bpath = spath.with_added_extension("bak");
-                                                //println!("spath:{spath:?},bpath:{bpath:?}");
-                                                if !is_xdelta {
-                                                    if spath.exists()
-                                                        && if bpath.exists() {
-                                                            fs::metadata(&bpath).unwrap().len() > 0
-                                                        } else {
-                                                            true
-                                                        }
-                                                    {
-                                                        let mut data = fs::read(&spath).unwrap();
-                                                        if bpath.exists() {
-                                                            println!("decoding backup xdelta");
-                                                            *progress.lock() = format!(
-                                                                "Decodificando el backup de {show_path}..."
-                                                            );
-                                                            if let Ok(d) = decoder::decode_all(
-                                                                &data,
-                                                                &fs::read(&bpath).unwrap(),
-                                                            ) {
-                                                                data = d;
-                                                            } else {
-                                                                println!(
-                                                                    "backup decode failed! was it an update?"
-                                                                );
-                                                            }
-                                                        }
-                                                        println!("making xdelta for backup");
-                                                        *progress.lock() = format!(
-                                                            "Haciendo backup de {show_path}..."
-                                                        );
-                                                        let mut fb = BufWriter::new(
-                                                            File::create(&bpath).unwrap(),
-                                                        );
-                                                        encoder::encode_all(
-                                                            &mut fb,
-                                                            &fs::read(f.path()).unwrap(),
-                                                            &data,
-                                                            CompressOptions::default(),
-                                                        )
-                                                        .unwrap();
-                                                        fb.flush().unwrap();
-                                                        //fs::copy(&spath, &bpath).unwrap();
+                                                        spath.push(format!("{fpr}_{os_suffix}"));
+                                                        spath.push(game_data_target);
                                                     } else {
-                                                        fs::write(&bpath, []).unwrap();
+                                                        valid = false;
                                                     }
+                                                    if valid
+                                                        && (deltarune_path.os
+                                                            == DeltaruneOsKind::Mac
+                                                            || deltarune_path.os
+                                                                == DeltaruneOsKind::Switch)
+                                                    {
+                                                        let mut np = p.clone();
+                                                        let fln =
+                                                            np.file_name().unwrap().to_os_string();
+                                                        np.pop();
+                                                        np.push(
+                                                            if deltarune_path.os
+                                                                == DeltaruneOsKind::Mac
+                                                            {
+                                                                "mac"
+                                                            } else {
+                                                                "switch"
+                                                            },
+                                                        );
+                                                        np.push(fln);
+                                                        if np.exists() && np.is_file() {
+                                                            mac_patch = Some(np);
+                                                        }
+                                                    }
+                                                } else {
+                                                    if is_xdelta {
+                                                        p.set_extension("");
+                                                    }
+                                                    let mut cmps = p
+                                                        .components()
+                                                        .skip(comp_count)
+                                                        .collect::<Vec<_>>();
+                                                    // folder + filename
+                                                    if cmps.len() > 1 {
+                                                        let fpr =
+                                                            cmps[0].as_os_str().to_str().unwrap();
+                                                        if fpr.len() == ("chapter".len() + 1)
+                                                            && fpr.starts_with("chapter")
+                                                            && let Some(ch) =
+                                                                fpr.chars().nth("chapter".len())
+                                                            && ch.is_ascii_digit()
+                                                        {
+                                                            cmps.remove(0);
+                                                            spath
+                                                                .push(format!("{fpr}_{os_suffix}"));
+                                                        }
+                                                    }
+                                                    spath.extend(cmps);
                                                 }
-                                                if is_xdelta {
-                                                    let mut read = fs::read(&spath).unwrap();
-                                                    if bpath.exists() && bpath.is_file() {
+                                            }
+                                            let bpath = spath.with_added_extension("bak");
+                                            //println!("spath:{spath:?},bpath:{bpath:?}");
+                                            if !is_xdelta {
+                                                if spath.exists()
+                                                    && if bpath.exists() {
+                                                        fs::metadata(&bpath).unwrap().len() > 0
+                                                    } else {
+                                                        true
+                                                    }
+                                                {
+                                                    let mut data = fs::read(&spath).unwrap();
+                                                    if bpath.exists() {
+                                                        println!("decoding backup xdelta");
                                                         *progress.lock() = format!(
                                                             "Decodificando el backup de {show_path}..."
                                                         );
-                                                        if let Ok(r) = decoder::decode_all(
-                                                            &read,
+                                                        if let Ok(d) = decoder::decode_all(
+                                                            &data,
                                                             &fs::read(&bpath).unwrap(),
                                                         ) {
-                                                            read = r;
+                                                            data = d;
                                                         } else {
                                                             println!(
                                                                 "backup decode failed! was it an update?"
                                                             );
                                                         }
                                                     }
-                                                    //println!("og:{spath:?},patch:{:?}", f.path());
-                                                    *progress.lock() = format!(
-                                                        "Aplicando el parche para {show_path}..."
-                                                    );
-                                                    let dec = decoder::decode_all(
-                                                        &read,
-                                                        &fs::read(f.path()).unwrap(),
-                                                    )
-                                                    .unwrap();
-
                                                     println!("making xdelta for backup");
                                                     *progress.lock() = format!(
-                                                        "Realizando backup de {show_path}..."
+                                                        "Haciendo backup de {show_path}..."
                                                     );
-                                                    {
-                                                        //fs::write(bpath.with_added_extension("source"), &dec).unwrap();
-                                                        //fs::write(bpath.with_added_extension("target"), &read).unwrap();
-                                                        let mut fb = BufWriter::new(
-                                                            File::create(&bpath).unwrap(),
-                                                        );
-                                                        encoder::encode_all(
-                                                            &mut fb,
-                                                            &dec,
-                                                            &read,
-                                                            CompressOptions {
-                                                                level: 3,
-                                                                ..Default::default()
-                                                            },
-                                                        )
-                                                        .unwrap();
-                                                        fb.flush().unwrap();
-                                                    }
-
-                                                    {
-                                                        let mut fw = BufWriter::new(
-                                                            File::create(&spath).unwrap(),
-                                                        );
-                                                        fw.write_all(&dec).unwrap();
-                                                        fw.flush().unwrap();
-                                                    }
-                                                    println!("wrote delta");
-
-                                                    *progress.lock() = format!("{show_path} OK");
+                                                    let mut fb = BufWriter::new(
+                                                        File::create(&bpath).unwrap(),
+                                                    );
+                                                    encoder::encode_all(
+                                                        &mut fb,
+                                                        &fs::read(f.path()).unwrap(),
+                                                        &data,
+                                                        CompressOptions::default(),
+                                                    )
+                                                    .unwrap();
+                                                    fb.flush().unwrap();
+                                                    //fs::copy(&spath, &bpath).unwrap();
                                                 } else {
-                                                    *progress.lock() =
-                                                        format!("Copiando archivo {show_path}");
-                                                    //println!("{:?},{spath:?}", f.path());
-                                                    fs::copy(f.path(), &spath).unwrap();
-                                                    *progress.lock() = format!("{show_path} OK");
-                                                    println!("copied");
+                                                    fs::write(&bpath, []).unwrap();
                                                 }
 
-                                                done += 1;
-                                                let tp = *typer_progress.lock();
-                                                *typer_progress.lock() =
-                                                    tp.max(done as f32 / count as f32);
+                                                *progress.lock() =
+                                                    format!("Copiando archivo {show_path}");
+                                                //println!("{:?},{spath:?}", f.path());
+                                                fs::copy(f.path(), &spath).unwrap();
+                                                *progress.lock() = format!("{show_path} OK");
+                                                println!("copied");
+                                            } else {
+                                                let mut read = fs::read(&spath).unwrap();
+                                                if bpath.exists() && bpath.is_file() {
+                                                    *progress.lock() = format!(
+                                                        "Decodificando el backup de {show_path}..."
+                                                    );
+                                                    if let Ok(r) = decoder::decode_all(
+                                                        &read,
+                                                        &fs::read(&bpath).unwrap(),
+                                                    ) {
+                                                        read = r;
+                                                    } else {
+                                                        println!(
+                                                            "backup decode failed! was it an update?"
+                                                        );
+                                                    }
+                                                }
+                                                //println!("og:{spath:?},patch:{:?}", f.path());
+                                                *progress.lock() = format!(
+                                                    "Aplicando el parche para {show_path}..."
+                                                );
+                                                let mut dec = read.clone();
+                                                if let Some(mac_patch) = mac_patch {
+                                                    dec = decoder::decode_all(
+                                                        &dec,
+                                                        &fs::read(mac_patch).unwrap(),
+                                                    )
+                                                    .unwrap();
+                                                }
+                                                dec = decoder::decode_all(
+                                                    &dec,
+                                                    &fs::read(f.path()).unwrap(),
+                                                )
+                                                .unwrap();
+
+                                                println!("making xdelta for backup");
+                                                *progress.lock() =
+                                                    format!("Realizando backup de {show_path}...");
+                                                {
+                                                    //fs::write(bpath.with_added_extension("source"), &dec).unwrap();
+                                                    //fs::write(bpath.with_added_extension("target"), &read).unwrap();
+                                                    let mut fb = BufWriter::new(
+                                                        File::create(&bpath).unwrap(),
+                                                    );
+                                                    encoder::encode_all(
+                                                        &mut fb,
+                                                        &dec,
+                                                        &read,
+                                                        CompressOptions {
+                                                            level: 3,
+                                                            ..Default::default()
+                                                        },
+                                                    )
+                                                    .unwrap();
+                                                    fb.flush().unwrap();
+                                                }
+
+                                                {
+                                                    let mut fw = BufWriter::new(
+                                                        File::create(&spath).unwrap(),
+                                                    );
+                                                    fw.write_all(&dec).unwrap();
+                                                    fw.flush().unwrap();
+                                                }
+                                                println!("wrote delta");
+
+                                                *progress.lock() = format!("{show_path} OK");
                                             }
+
+                                            done += 1;
+                                            let tp = *typer_progress.lock();
+                                            *typer_progress.lock() =
+                                                tp.max(done as f32 / count as f32);
                                         }
                                     }
                                 }
@@ -1048,13 +1319,14 @@ fn main() {
                         if galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                         } else {
-                            *progress.lock() = String::new();
                             typer.stop();
                             let mut success = false;
                             if let Some(pt) = patch_task.take() {
                                 if let Err(e) = pt.join() {
                                     let mut f =
                                         BufWriter::new(File::create("patching_error.txt").unwrap());
+                                    f.write_all(progress.lock().as_bytes()).unwrap();
+                                    f.write_all("\n\n".as_bytes()).unwrap();
                                     f.write_all(if let Some(s) = e.downcast_ref::<&str>() {
                                         s.as_bytes()
                                     } else if let Some(s) = e.downcast_ref::<String>() {
@@ -1068,6 +1340,7 @@ fn main() {
                                     success = true;
                                 }
                             }
+                            *progress.lock() = String::new();
                             state = if success {
                                 PatcherState::PatchSuccess
                             } else {
@@ -1100,7 +1373,8 @@ fn main() {
                         } else if pitch_another_him >= 0.96 {
                             typer.stop();
                             println!("CLEAR FOLDER");
-                            *folder.lock() = PathBuf::new();
+                            folder = PathBuf::new();
+                            deltarune_path.lock().take();
                             state = PatcherState::FindFolder;
                         }
                         goner_alpha = galpha;
