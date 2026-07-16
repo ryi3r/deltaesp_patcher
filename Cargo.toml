@@ -1,6 +1,6 @@
 [package]
 name = "deltaesp_patcher"
-version = "1.0.16"
+version = "1.0.17"
 edition = "2024"
 authors = ["ryi3r <itsryi3r@gmail.com>"]
 
@@ -25,7 +25,9 @@ oxidelta = { git = "https://github.com/sockudo/oxidelta.git", features = [
     "parallel",
 ] }
 whoami = "2.1.2"
-clap = "4.6.1"
+clap = "4.6.2"
+log = "0.4.33"
+ftail = "0.3.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

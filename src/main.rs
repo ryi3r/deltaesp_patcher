@@ -12,6 +12,8 @@ use std::{
 };
 
 use clap::Parser;
+use ftail::Ftail;
+use log::{LevelFilter, debug, info, warn};
 #[allow(unused_imports)]
 use oxidelta::compress::{CompressOptions, decoder, encoder};
 use parking_lot::Mutex;
@@ -60,7 +62,7 @@ fn transform_deltarune_path(pb: &Path) -> Option<DeltarunePath> {
         drp.path.pop(); // DELTARUNE.exe (and other) -> folder path
     }
     if !drp.path.is_dir() {
-        println!("{:?} isn't a directory?", drp.path);
+        warn!("{:?} isn't a directory?", drp.path);
     }
     {
         let dir = drp.path.file_name().unwrap().to_string_lossy();
@@ -165,7 +167,7 @@ fn transform_deltarune_path(pb: &Path) -> Option<DeltarunePath> {
                     DeltaruneOsKind::Switch => "game.win",
                 });
                 if cfg!(feature = "uninstaller") && !p.add_extension("bak") {
-                    println!("failed to add extension to file??");
+                    warn!("failed to add extension to file??");
                     return None; // what?
                 }
                 if p.exists() && p.is_file() {
@@ -313,6 +315,11 @@ pub struct Args {
 }
 
 fn main() {
+    Ftail::new()
+        .console(LevelFilter::Debug)
+        .single_file(&PathBuf::from("log.txt"), false, LevelFilter::Debug)
+        .init()
+        .unwrap();
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::System::Console::{
@@ -352,7 +359,7 @@ fn main() {
             scale += 1;
         }
         rl.set_window_size(640 * scale, 480 * scale);
-        //println!("{:?}, {:?}, {:?}", ((w - rl.get_screen_width()) / 2, (h - rl.get_screen_height()) / 2), (w, h), (rl.get_screen_width(), rl.get_screen_height()));
+        //debug!("{:?}, {:?}, {:?}", ((w - rl.get_screen_width()) / 2, (h - rl.get_screen_height()) / 2), (w, h), (rl.get_screen_width(), rl.get_screen_height()));
         rl.set_window_position(
             (w - rl.get_screen_width()) / 2,
             (h - rl.get_screen_height()) / 2,
@@ -424,7 +431,7 @@ fn main() {
             if let Ok(Some(a)) = lib.find_app(1_671_210) {
                 // deltarune's steam id
                 folder = a.1.resolve_app_dir(&a.0);
-                println!("UPDATE FOLDER");
+                debug!("UPDATE FOLDER");
             }
         }
     }
@@ -568,7 +575,7 @@ fn main() {
 
     //let mut cl = 0;
     while !rl.window_should_close() && !close {
-        //println!("FRAME: {state:?} {galpha:.2} {inst_alpha:.2}");
+        //debug!("FRAME: {state:?} {galpha:.2} {inst_alpha:.2}");
         let mut d = rl.begin_drawing(&thread);
         let delta = d.get_frame_time();
         d.clear_background(Color::BLACK);
@@ -688,7 +695,7 @@ fn main() {
                                     } else {
                                         folder.clear();
                                         deltarune_path.lock().take();
-                                        println!("CLEAR FOLDER (2)");
+                                        debug!("CLEAR FOLDER (2)");
                                         PatcherState::FindFolder
                                     }
                                 }
@@ -825,7 +832,7 @@ fn main() {
                                         *deltarune_path.lock() = Some(mp);
                                         PatcherState::Patch
                                     } else {
-                                        println!("CLEAR FOLDER (1)");
+                                        debug!("CLEAR FOLDER (1)");
                                         PatcherState::RefuseStartPatch
                                     };
                                 }
@@ -864,7 +871,7 @@ fn main() {
                                         os: DeltaruneOsKind::default(),
                                     })
                                     .into();
-                                println!("UPDATE FOLDER");
+                                debug!("UPDATE FOLDER");
                             }
                         }
                     }
@@ -1012,7 +1019,7 @@ fn main() {
                                         }
                                     }
                                 }
-                                println!("count! {count}");
+                                debug!("count! {count}");
                                 let mut done = 0usize;
                                 while let Some(dir) = dirs.pop() {
                                     if let Ok(d) = fs::read_dir(&dir) {
@@ -1046,7 +1053,7 @@ fn main() {
                                                 .to_string_lossy()
                                                 .to_string()
                                                 .replace(".xdelta", "");
-                                            println!("processing: {show_path}");
+                                            info!("processing: {show_path}");
                                             if show_path.len() > 20 {
                                                 show_path =
                                                     show_path[(show_path.len() - 20)..].to_string();
@@ -1130,7 +1137,7 @@ fn main() {
                                                     ) {
                                                         fs::write(spath, &patched).unwrap();
                                                     } else {
-                                                        println!(
+                                                        warn!(
                                                             "unable to apply backup patch! was it an update?"
                                                         );
                                                     }
@@ -1139,7 +1146,7 @@ fn main() {
                                                     fs::remove_file(&spath).unwrap();
                                                 }
                                                 fs::remove_file(&bpath).unwrap();
-                                                //println!("spath:{spath:?},bpath:{bpath:?}");
+                                                //debug!("spath:{spath:?},bpath:{bpath:?}");
                                             }
 
                                             done += 1;
@@ -1179,14 +1186,7 @@ fn main() {
                             {
                                 let mut f =
                                     BufWriter::new(File::create("uninstalling_error.txt").unwrap());
-                                f.write_all(if let Some(s) = e.downcast_ref::<&str>() {
-                                    s.as_bytes()
-                                } else if let Some(s) = e.downcast_ref::<String>() {
-                                    s.as_bytes()
-                                } else {
-                                    "???".as_bytes()
-                                })
-                                .unwrap();
+                                f.write_all(format!("{e:?}").as_bytes()).unwrap();
                                 f.flush().unwrap();
                             }
                             state = PatcherState::EndUninstalledTalkA;
@@ -1260,7 +1260,7 @@ fn main() {
                                         }
                                     }
                                 }
-                                println!("count! {count}");
+                                info!("count! {count}");
                                 let mut done = 0usize;
                                 while let Some(dir) = dirs.pop() {
                                     if let Ok(d) = fs::read_dir(&dir) {
@@ -1294,7 +1294,7 @@ fn main() {
                                                 .to_string_lossy()
                                                 .to_string()
                                                 .replace(".xdelta", "");
-                                            println!("processing: {show_path}");
+                                            info!("processing: {show_path}");
                                             if show_path.len() > 20 {
                                                 show_path =
                                                     show_path[(show_path.len() - 20)..].to_string();
@@ -1398,7 +1398,7 @@ fn main() {
                                                 }
                                             }
                                             let bpath = spath.with_added_extension("bak");
-                                            //println!("spath:{spath:?},bpath:{bpath:?}");
+                                            //debug!("spath:{spath:?},bpath:{bpath:?}");
                                             if !is_xdelta {
                                                 if spath.exists()
                                                     && if bpath.exists() {
@@ -1409,7 +1409,7 @@ fn main() {
                                                 {
                                                     let mut data = fs::read(&spath).unwrap();
                                                     if bpath.exists() {
-                                                        println!("decoding backup xdelta");
+                                                        info!("decoding backup xdelta");
                                                         *progress.lock() = format!(
                                                             "Decodificando el backup de {show_path}..."
                                                         );
@@ -1419,12 +1419,12 @@ fn main() {
                                                         ) {
                                                             data = d;
                                                         } else {
-                                                            println!(
+                                                            warn!(
                                                                 "backup decode failed! was it an update?"
                                                             );
                                                         }
                                                     }
-                                                    println!("making xdelta for backup");
+                                                    info!("making xdelta for backup");
                                                     *progress.lock() = format!(
                                                         "Haciendo backup de {show_path}..."
                                                     );
@@ -1446,10 +1446,10 @@ fn main() {
 
                                                 *progress.lock() =
                                                     format!("Copiando archivo {show_path}");
-                                                //println!("{:?},{spath:?}", f.path());
+                                                //debug!("{:?},{spath:?}", f.path());
                                                 fs::copy(f.path(), &spath).unwrap();
                                                 *progress.lock() = format!("{show_path} OK");
-                                                println!("copied");
+                                                info!("copied");
                                             } else {
                                                 let mut read = fs::read(&spath).unwrap();
                                                 if bpath.exists() && bpath.is_file() {
@@ -1462,12 +1462,12 @@ fn main() {
                                                     ) {
                                                         read = r;
                                                     } else {
-                                                        println!(
+                                                        warn!(
                                                             "backup decode failed! was it an update?"
                                                         );
                                                     }
                                                 }
-                                                //println!("og:{spath:?},patch:{:?}", f.path());
+                                                //info!("og:{spath:?},patch:{:?}", f.path());
                                                 *progress.lock() = format!(
                                                     "Aplicando el parche para {show_path}..."
                                                 );
@@ -1485,7 +1485,7 @@ fn main() {
                                                 )
                                                 .unwrap();
 
-                                                println!("making xdelta for backup");
+                                                info!("making xdelta for backup");
                                                 *progress.lock() =
                                                     format!("Realizando backup de {show_path}...");
                                                 {
@@ -1514,7 +1514,7 @@ fn main() {
                                                     fw.write_all(&dec).unwrap();
                                                     fw.flush().unwrap();
                                                 }
-                                                println!("wrote delta");
+                                                info!("wrote delta");
 
                                                 *progress.lock() = format!("{show_path} OK");
                                             }
@@ -1528,7 +1528,7 @@ fn main() {
                                 }
                                 *progress.lock() = "Finalizado.".into();
                                 *typer_progress.lock() = 1.;
-                                println!("finished");
+                                info!("finished");
                             }));
                         }
                     }
@@ -1559,14 +1559,7 @@ fn main() {
                                         BufWriter::new(File::create("patching_error.txt").unwrap());
                                     f.write_all(progress.lock().as_bytes()).unwrap();
                                     f.write_all("\n\n".as_bytes()).unwrap();
-                                    f.write_all(if let Some(s) = e.downcast_ref::<&str>() {
-                                        s.as_bytes()
-                                    } else if let Some(s) = e.downcast_ref::<String>() {
-                                        s.as_bytes()
-                                    } else {
-                                        "???".as_bytes()
-                                    })
-                                    .unwrap();
+                                    f.write_all(format!("{e:?}").as_bytes()).unwrap();
                                     f.flush().unwrap();
                                 } else {
                                     success = true;
@@ -1609,7 +1602,7 @@ fn main() {
                                 galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                             } else if pitch_another_him >= 0.96 {
                                 typer.stop();
-                                println!("CLEAR FOLDER");
+                                debug!("CLEAR FOLDER");
                                 folder = PathBuf::new();
                                 deltarune_path.lock().take();
                                 state = PatcherState::FindFolder;
@@ -1833,7 +1826,7 @@ fn main() {
             }
             let alpha = (timer.elapsed().as_secs_f32() * 2.).sin() * 0.2 + 0.6;
             let fake_galpha = if skipping { 1. } else { galpha };
-            //println!("galpha={fake_galpha:.2} falpha={falpha:.2} final={:.2}", fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
+            //info!("galpha={fake_galpha:.2} falpha={falpha:.2} final={:.2}", fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
             if let Some(typer) = &mut typer {
                 typer.draw(
                     &mut d,
@@ -1935,7 +1928,7 @@ fn main() {
                     (goner.width as f32 * scale).floor(),
                     (goner.height as f32 * tp * scale).floor(),
                 );
-                //println!("{scale}, {}, {}, {src:?}, {dest:?}", goner.width, goner.height);
+                //info!("{scale}, {}, {}, {src:?}, {dest:?}", goner.width, goner.height);
                 d.draw_texture_pro(
                     goner,
                     src,
