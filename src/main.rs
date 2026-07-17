@@ -58,6 +58,9 @@ fn transform_deltarune_path(pb: &Path) -> Option<DeltarunePath> {
         path: pb.to_path_buf(),
         os: DeltaruneOsKind::default(),
     };
+    if drp.path.is_empty() {
+        return None; // if deltarune wasn't found this'll be empty, account for it...
+    }
     if drp.path.is_file() {
         drp.path.pop(); // DELTARUNE.exe (and other) -> folder path
     }
