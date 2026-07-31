@@ -13,7 +13,7 @@ use std::{
 
 use clap::Parser;
 use ftail::Ftail;
-use log::{LevelFilter, debug, info, warn};
+use log::{LevelFilter, debug, error, info, warn};
 #[allow(unused_imports)]
 use oxidelta::compress::{CompressOptions, decoder, encoder};
 use parking_lot::Mutex;
@@ -323,6 +323,9 @@ fn main() {
         .single_file(&PathBuf::from("log.txt"), false, LevelFilter::Debug)
         .init()
         .unwrap();
+    std::panic::set_hook(Box::new(|phi| {
+        error!("Panic catched!\n{phi}");
+    }));
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::System::Console::{
@@ -380,7 +383,7 @@ fn main() {
             .unwrap(),
         );
     }
-    let audio = RaylibAudio::init_audio_device().unwrap();
+    let audio = RaylibAudio::init_audio_device().ok();
     let camera = Camera2D {
         zoom: scale as _,
         ..Default::default()
@@ -399,8 +402,7 @@ fn main() {
             16,
             Some(&c),
         )
-        .unwrap()
-        .into()
+        .ok()
     };
     let img_depth_tex = if files.is_empty() {
         None
@@ -431,8 +433,8 @@ fn main() {
 
     if let Ok(sl) = steamlocate::locate_all() {
         for lib in sl {
+            // deltarune's steam id
             if let Ok(Some(a)) = lib.find_app(1_671_210) {
-                // deltarune's steam id
                 folder = a.1.resolve_app_dir(&a.0);
                 debug!("UPDATE FOLDER");
             }
@@ -463,53 +465,41 @@ fn main() {
     };
     let img_soul_blur_tex = if files.is_empty() {
         None
+    } else if let Ok(img) = Image::load_image_from_mem(".png", &files["image_soul_blur.png"]) {
+        rl.load_texture_from_image(&thread, &img).ok()
     } else {
-        rl.load_texture_from_image(
-            &thread,
-            &Image::load_image_from_mem(".png", &files["image_soul_blur.png"]).unwrap(),
-        )
-        .unwrap()
-        .into()
+        None
     };
     #[allow(unused)]
     let mut soul = ImageSoulBlurRenderer::new(img_soul_blur_tex);
     #[allow(unused)]
     let aud_appearance = if files.is_empty() {
         None
+    } else if let Some(audio) = &audio
+        && let Ok(wave) = audio.new_wave_from_memory(".wav", &files["audio_appearance.wav"])
+    {
+        audio.new_sound_from_wave(&wave).ok()
     } else {
-        audio
-            .new_sound_from_wave(
-                &audio
-                    .new_wave_from_memory(".wav", &files["audio_appearance.wav"])
-                    .unwrap(),
-            )
-            .unwrap()
-            .into()
+        None
     };
     let aud_another_him = if files.is_empty() {
         None
+    } else if let Some(audio) = &audio
+        && let Ok(wave) = audio.new_wave_from_memory(".ogg", &files["audio_anotherhim.ogg"])
+    {
+        audio.new_sound_from_wave(&wave).ok()
     } else {
-        audio
-            .new_sound_from_wave(
-                &audio
-                    .new_wave_from_memory(".ogg", &files["audio_anotherhim.ogg"])
-                    .unwrap(),
-            )
-            .unwrap()
-            .into()
+        None
     };
     #[cfg(feature = "uninstaller")]
     let aud_face = if files.is_empty() {
         None
+    } else if let Some(audio) = &audio
+        && let Ok(wave) = audio.new_wave_from_memory(".ogg", &files["face.ogg"])
+    {
+        audio.new_sound_from_wave(&wave).ok()
     } else {
-        audio
-            .new_sound_from_wave(
-                &audio
-                    .new_wave_from_memory(".ogg", &files["face.ogg"])
-                    .unwrap(),
-            )
-            .unwrap()
-            .into()
+        None
     };
     #[allow(unused)]
     let mut play_another_him = cfg!(feature = "uninstaller");
@@ -562,13 +552,10 @@ fn main() {
     #[cfg(feature = "uninstaller")]
     let img_friend = if files.is_empty() {
         None
+    } else if let Ok(img) = Image::load_image_from_mem(".png", &files["friend.png"]) {
+        rl.load_texture_from_image(&thread, &img).ok()
     } else {
-        rl.load_texture_from_image(
-            &thread,
-            &Image::load_image_from_mem(".png", &files["friend.png"]).unwrap(),
-        )
-        .unwrap()
-        .into()
+        None
     };
     #[cfg(feature = "uninstaller")]
     let mut friend_scale = 1f32;
@@ -1476,11 +1463,13 @@ fn main() {
                                                 );
                                                 let mut dec = read.clone();
                                                 if let Some(mac_patch) = mac_patch {
+                                                    info!("applying mac patch");
                                                     dec = decoder::decode_all(
                                                         &dec,
                                                         &fs::read(mac_patch).unwrap(),
                                                     )
                                                     .unwrap();
+                                                    info!("ok");
                                                 }
                                                 dec = decoder::decode_all(
                                                     &dec,
