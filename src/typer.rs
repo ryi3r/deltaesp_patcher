@@ -2,7 +2,7 @@ use std::{collections::HashMap, time::Instant};
 
 use sola_raylib::{
     color::Color,
-    drawing::{RaylibDraw, RaylibDrawHandle},
+    drawing::{RaylibDraw, RaylibDrawHandle, RaylibMode2D},
     ffi::KeyboardKey,
     math::Vector2,
     text::{Font, RaylibFont},
@@ -24,7 +24,9 @@ pub struct Typer {
     pub instant_show: bool,
     pub increase_typer: bool,
 
-    pub fnt: Font,
+    pub fnt: Option<Font>,
+
+    pub cli: bool,
 }
 
 impl Typer {
@@ -40,8 +42,11 @@ impl Typer {
         shadow_alpha: f32,
         global_alpha: f32,
     ) {
+        let Some(fnt) = &self.fnt else {
+            return;
+        };
         d.draw_text_ex(
-            &self.fnt,
+            fnt,
             text,
             Vector2::new(pos.x - 1., pos.y),
             16.,
@@ -49,7 +54,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            &self.fnt,
+            fnt,
             text,
             Vector2::new(pos.x + 1., pos.y),
             16.,
@@ -57,7 +62,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            &self.fnt,
+            fnt,
             text,
             Vector2::new(pos.x, pos.y - 1.),
             16.,
@@ -65,7 +70,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            &self.fnt,
+            fnt,
             text,
             Vector2::new(pos.x, pos.y + 1.),
             16.,
@@ -74,7 +79,7 @@ impl Typer {
         );
 
         d.draw_text_ex(
-            &self.fnt,
+            fnt,
             text,
             Vector2::new(pos.x - 1., pos.y - 1.),
             16.,
@@ -82,7 +87,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            &self.fnt,
+            fnt,
             text,
             Vector2::new(pos.x + 1., pos.y - 1.),
             16.,
@@ -90,7 +95,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            &self.fnt,
+            fnt,
             text,
             Vector2::new(pos.x + 1., pos.y + 1.),
             16.,
@@ -98,7 +103,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
         d.draw_text_ex(
-            &self.fnt,
+            fnt,
             text,
             Vector2::new(pos.x - 1., pos.y + 1.),
             16.,
@@ -106,14 +111,7 @@ impl Typer {
             Color::WHITE.alpha((shadow_alpha * global_alpha) / 3.),
         );
 
-        d.draw_text_ex(
-            &self.fnt,
-            text,
-            pos,
-            16.,
-            4.,
-            Color::WHITE.alpha(global_alpha),
-        );
+        d.draw_text_ex(fnt, text, pos, 16., 4., Color::WHITE.alpha(global_alpha));
     }
 
     pub fn draw_text(
@@ -212,14 +210,17 @@ impl Typer {
         global_alpha: f32,
         tint: Color,
     ) {
-        let nl_y = self.fnt.measure_text(&NEW_LINE.to_string(), 32., 8.).y / 2.;
+        let Some(fnt) = &self.fnt else {
+            return;
+        };
+        let nl_y = fnt.measure_text(&NEW_LINE.to_string(), 32., 8.).y / 2.;
         let mut c = 0;
         for (i, s) in text.split(NEW_LINE).enumerate() {
-            let s_x = self.fnt.measure_text(s, 32., 8.).x / 2.;
+            let s_x = fnt.measure_text(s, 32., 8.).x / 2.;
             if c + s.len() >= offset {
                 Self::draw_text(
                     d,
-                    &self.fnt,
+                    fnt,
                     Vector2::new(
                         (pos.x - s_x).floor(),
                         (pos.y + (i as f32 * 8.)).floor() + (nl_y * i as f32),
@@ -233,7 +234,7 @@ impl Typer {
             }
             Self::draw_text(
                 d,
-                &self.fnt,
+                fnt,
                 Vector2::new(
                     (pos.x - s_x).floor(),
                     (pos.y + (i as f32 * 8.)).floor() + (nl_y * i as f32),
@@ -256,10 +257,13 @@ impl Typer {
         shadow_alpha: f32,
         global_alpha: f32,
     ) {
-        let nl_y = self.fnt.measure_text(&NEW_LINE.to_string(), 16., 4.).y / 2.;
+        let Some(fnt) = &self.fnt else {
+            return;
+        };
+        let nl_y = fnt.measure_text(&NEW_LINE.to_string(), 16., 4.).y / 2.;
         let mut c = 0;
         for (i, s) in text.split(NEW_LINE).enumerate() {
-            let s_x = self.fnt.measure_text(s, 16., 4.).x / 2.;
+            let s_x = fnt.measure_text(s, 16., 4.).x / 2.;
             if c + s.len() >= offset {
                 self.draw_text_half(
                     d,
@@ -326,6 +330,10 @@ impl Typer {
         self.text = ntext;
         self.playing = true;
         self.timer = Instant::now();
+
+        if self.cli {
+            println!("{}", self.text.replace("\n", " ").replace("  ", " "));
+        }
     }
 
     pub fn stop(&mut self) {
@@ -341,11 +349,21 @@ impl Typer {
         self.playing && self.chars > self.text.len()
     }
 
-    pub fn draw(&mut self, d: &mut RaylibDrawHandle, shadow_alpha: f32, global_alpha: f32) {
-        let is_skip_pressed = d.is_key_down(KeyboardKey::KEY_X)
-            || d.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
-            || d.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
-        if self.instant_show {
+    pub fn draw(
+        &mut self,
+        mut d: &mut Option<RaylibMode2D<'_, RaylibDrawHandle>>,
+        shadow_alpha: f32,
+        global_alpha: f32,
+    ) {
+        let is_skip_pressed = d
+            .as_ref()
+            .map(|d| {
+                d.is_key_down(KeyboardKey::KEY_X)
+                    || d.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
+                    || d.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT)
+            })
+            .unwrap_or(false);
+        if self.instant_show || d.is_none() {
             self.chars = self.text.len() + 1;
         }
         if self.chars < (self.text.len() + 1)
@@ -370,14 +388,16 @@ impl Typer {
                 self.chars += 1;
             }
         }
-        self.draw_text_centered_part(
-            d,
-            self.pos,
-            &self.text,
-            self.chars,
-            shadow_alpha,
-            global_alpha,
-            Color::WHITE,
-        );
+        if let Some(d) = &mut d {
+            self.draw_text_centered_part(
+                d,
+                self.pos,
+                &self.text,
+                self.chars,
+                shadow_alpha,
+                global_alpha,
+                Color::WHITE,
+            );
+        }
     }
 }

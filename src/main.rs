@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+use std::time::Duration;
 #[allow(unused_imports)]
 use std::{
     collections::HashMap,
@@ -260,6 +261,7 @@ fn test_mac_path() {
 #[cfg(feature = "uninstaller")]
 pub enum PatcherState {
     Init = -1,
+    MissingFiles,
     StartTalkA,
     StartTalkB,
     FindFolder,
@@ -278,6 +280,7 @@ pub enum PatcherState {
 #[cfg(not(feature = "uninstaller"))]
 pub enum PatcherState {
     Init = -1,
+    MissingFiles,
     StartTalkA,
     StartTalkB,
     SoulEntrance,
@@ -315,14 +318,28 @@ pub struct Args {
     pub no_question_gui: bool,
     #[arg(short, long, default_value = "false")]
     pub skip_outro_gui: bool,
+
+    /// Forces cli mode, will use the cli in a interactive-ish way without the gui.
+    #[arg(short, long, default_value = "false")]
+    pub interactive: bool,
 }
 
 fn main() {
-    Ftail::new()
-        .console(LevelFilter::Debug)
-        .single_file(&PathBuf::from("log.txt"), false, LevelFilter::Debug)
-        .init()
-        .unwrap();
+    let mut args = Args::parse();
+    if args.interactive {
+        args.cli = true;
+    }
+    let args = args;
+    //println!("{args:?}");
+
+    {
+        let mut ft = Ftail::new();
+        if !args.interactive {
+            ft = ft.console(LevelFilter::Debug);
+        }
+        ft = ft.single_file(&PathBuf::from("log.txt"), false, LevelFilter::Off);
+        ft.init().unwrap();
+    }
     std::panic::set_hook(Box::new(|phi| {
         error!("Panic catched!\n{phi}");
     }));
@@ -341,22 +358,30 @@ fn main() {
         }
     }
 
-    let args = Args::parse();
     let files = if args.cli {
         HashMap::default()
     } else {
         postcard::from_bytes::<HashMap<String, Vec<u8>>>(&fs::read("data.bin").unwrap()).unwrap()
     };
-    let (mut rl, thread) = sola_raylib::init()
-        .hidden()
-        .size(640, 480)
-        .title("DeltaESP Patcher")
-        .vsync()
-        .build();
-    rl.set_trace_log(TraceLogLevel::LOG_WARNING);
-    rl.set_exit_key(None);
+    let (mut rl, thread) = if args.cli {
+        (None, None)
+    } else {
+        let r = sola_raylib::init()
+            .hidden()
+            .size(640, 480)
+            .title("DeltaESP Patcher")
+            .vsync()
+            .build();
+        (Some(r.0), Some(r.1))
+    };
+    if let Some(rl) = &mut rl {
+        rl.set_trace_log(TraceLogLevel::LOG_WARNING);
+        rl.set_exit_key(None);
+    }
     let mut scale = 1;
-    if !args.cli {
+    if !args.cli
+        && let Some(rl) = &mut rl
+    {
         rl.clear_window_state(WindowState::default().set_window_hidden(true));
         let cm = window::get_current_monitor();
         let w = window::get_monitor_width(cm);
@@ -383,32 +408,40 @@ fn main() {
             .unwrap(),
         );
     }
-    let audio = RaylibAudio::init_audio_device().ok();
-    let camera = Camera2D {
-        zoom: scale as _,
-        ..Default::default()
+    let audio = if args.cli {
+        None
+    } else {
+        RaylibAudio::init_audio_device().ok()
+    };
+    let camera = if args.cli {
+        None
+    } else {
+        Some(Camera2D {
+            zoom: scale as _,
+            ..Default::default()
+        })
     };
     let fnt = if files.is_empty() {
         None
-    } else {
+    } else if let Some(rl) = &mut rl
+        && let Some(thread) = &thread
+    {
         let c = whoami::username()
             .unwrap_or(String::from("JUGADOR"))
             .to_uppercase()
-            + "0123456789QWERTYUIOPASDFGHJKLZXCVBNMqwertyuiopasdfghjklzxcvbnm,./<>?:;\"'{}[]¿¡~`áéíóúÁÉÍÓÚñÑ!@#$%^&*()_+-=\\";
-        rl.load_font_from_memory(
-            &thread,
-            ".ttf",
-            &files["8bitoperator_jve.ttf"],
-            16,
-            Some(&c),
-        )
-        .ok()
+            + "0123456789QWERTYUIOPASDFGHJKLZXCVBNMqwertyuiopasdfghjklzxcvbnm,./<>?:;\"'{}[]¿¡~`áéíóúÁÉÍÓÚñÑçÇüÜ!@#$%^&*()_+-=\\";
+        rl.load_font_from_memory(thread, ".ttf", &files["8bitoperator_jve.ttf"], 16, Some(&c))
+            .ok()
+    } else {
+        None
     };
     let img_depth_tex = if files.is_empty() {
         None
-    } else {
+    } else if let Some(rl) = &mut rl
+        && let Some(thread) = &thread
+    {
         rl.load_texture_from_image(
-            &thread,
+            thread,
             &Image::load_image_from_mem(
                 ".png",
                 &files[if cfg!(feature = "uninstaller") {
@@ -421,6 +454,8 @@ fn main() {
         )
         .unwrap()
         .into()
+    } else {
+        None
     };
     let timer = Instant::now();
     let mut idr = Vec::new();
@@ -429,6 +464,7 @@ fn main() {
     let typer_progress = Arc::new(Mutex::new(0f32));
     let progress = Arc::new(Mutex::new(String::new()));
     let deltarune_path = Arc::new(Mutex::new(None));
+    let mut last_progress = String::new();
     let mut folder = PathBuf::new();
 
     if let Ok(sl) = steamlocate::locate_all() {
@@ -444,14 +480,14 @@ fn main() {
         folder = p.clone();
     }
 
-    if args.cli {
+    if args.cli && !args.interactive {
         if let Some(mp) = transform_deltarune_path(&folder) {
             *deltarune_path.lock() = Some(mp);
         } else {
             panic!("DELTARUNE was not found.");
         }
     }
-    let mut state = if args.cli {
+    let mut state = if args.cli && !args.interactive {
         #[cfg(not(feature = "uninstaller"))]
         {
             PatcherState::Patch
@@ -465,8 +501,11 @@ fn main() {
     };
     let img_soul_blur_tex = if files.is_empty() {
         None
-    } else if let Ok(img) = Image::load_image_from_mem(".png", &files["image_soul_blur.png"]) {
-        rl.load_texture_from_image(&thread, &img).ok()
+    } else if let Ok(img) = Image::load_image_from_mem(".png", &files["image_soul_blur.png"])
+        && let Some(rl) = &mut rl
+        && let Some(thread) = &thread
+    {
+        rl.load_texture_from_image(thread, &img).ok()
     } else {
         None
     };
@@ -509,24 +548,20 @@ fn main() {
     } else {
         0.2
     };
-    let mut typer = if let Some(fnt) = fnt {
-        Typer {
-            timer: Instant::now(),
-            text: String::new(),
-            pos: Vector2::new(320., 220.),
-            playing: false,
-            chars: 0,
-            delay: HashMap::new(),
-            instant_show: false,
-            increase_typer: true,
-            fnt,
-        }
-        .into()
-    } else {
-        None
+    let mut typer = Typer {
+        timer: Instant::now(),
+        text: String::new(),
+        pos: Vector2::new(320., 220.),
+        playing: false,
+        chars: 0,
+        delay: HashMap::new(),
+        instant_show: false,
+        increase_typer: true,
+        fnt,
+        cli: args.interactive,
     };
     #[cfg(feature = "uninstaller")]
-    if let Some(typer) = &mut typer {
+    {
         typer.pos.y = 100.;
     }
     let mut galpha = 1f32;
@@ -552,28 +587,87 @@ fn main() {
     #[cfg(feature = "uninstaller")]
     let img_friend = if files.is_empty() {
         None
-    } else if let Ok(img) = Image::load_image_from_mem(".png", &files["friend.png"]) {
-        rl.load_texture_from_image(&thread, &img).ok()
+    } else if let Some(rl) = &mut rl
+        && let Some(thread) = &thread
+        && let Ok(img) = Image::load_image_from_mem(".png", &files["friend.png"])
+    {
+        rl.load_texture_from_image(thread, &img).ok()
     } else {
         None
     };
     #[cfg(feature = "uninstaller")]
     let mut friend_scale = 1f32;
 
+    let init_path = if let Some(p) = &args.patch_path {
+        p.clone()
+    } else {
+        let mut p = std::env::current_dir().unwrap();
+        p.push("patch");
+        p
+    };
+
+    let mut patchfile_count = 0usize;
+    let mut patch_dirs = vec![init_path.clone()];
+    {
+        let mut dirs = vec![init_path];
+        while let Some(dir) = dirs.pop() {
+            if let Ok(d) = fs::read_dir(dir) {
+                for f in d.flatten() {
+                    let Ok(ft) = f.file_type() else {
+                        continue;
+                    };
+                    if ft.is_dir() {
+                        let dir = f.path();
+                        let fname = dir.file_name().unwrap_or_default().to_string_lossy();
+                        if fname != "mac" && fname != "switch" {
+                            dirs.push(dir.clone());
+                            patch_dirs.push(dir);
+                        }
+                        continue;
+                    }
+                    patchfile_count += 1;
+                }
+            }
+        }
+    }
+    debug!("count! {patchfile_count}");
+    if args.cli && !args.interactive {
+        panic!("invalid patch path found! (it's empty!)");
+    }
+
     //state = PatcherState::CloseTimed;
     //galpha = 2.;
 
     //let mut cl = 0;
-    while !rl.window_should_close() && !close {
-        //debug!("FRAME: {state:?} {galpha:.2} {inst_alpha:.2}");
-        let mut d = rl.begin_drawing(&thread);
-        let delta = d.get_frame_time();
-        d.clear_background(Color::BLACK);
+    while !rl
+        .as_ref()
+        .map(|x| x.window_should_close())
+        .unwrap_or(false)
+        && !close
+    {
+        //println!("FRAME: {state:?} {galpha:.2} {inst_alpha:.2}");
+        let mut d = if let Some(rl) = &mut rl
+            && let Some(thread) = &thread
         {
-            let mut d = d.begin_mode2D(camera);
-            if let Some(typer) = &typer
-                && typer.playing
-            {
+            rl.begin_drawing(thread).into()
+        } else {
+            None
+        };
+        let delta;
+        if let Some(d) = &d {
+            delta = d.get_frame_time();
+        } else {
+            delta = 1. / 60.;
+            std::thread::sleep(Duration::from_secs_f32(delta));
+        };
+        if let Some(d) = &mut d {
+            d.clear_background(Color::BLACK);
+        }
+        {
+            let mut d = d
+                .as_mut()
+                .and_then(|d| camera.as_ref().map(|cam| d.begin_mode2D(cam)));
+            if typer.playing {
                 if skipping {
                     if falpha > 0. {
                         falpha = (falpha - delta).max(0.);
@@ -583,18 +677,18 @@ fn main() {
                 }
             }
             #[cfg(not(feature = "uninstaller"))]
-            if (d.is_key_pressed(KeyboardKey::KEY_C)
-                || d.is_key_pressed(KeyboardKey::KEY_LEFT_CONTROL)
-                || d.is_key_pressed(KeyboardKey::KEY_RIGHT_CONTROL))
+            if patchfile_count > 0
+                && let Some(d) = &d
+                && (d.is_key_pressed(KeyboardKey::KEY_C)
+                    || d.is_key_pressed(KeyboardKey::KEY_LEFT_CONTROL)
+                    || d.is_key_pressed(KeyboardKey::KEY_RIGHT_CONTROL))
                 && state < PatcherState::SoulExit
             {
                 skipped = true;
                 state = PatcherState::SoulExit;
                 idr_time = Instant::now();
                 play_another_him = true;
-                if let Some(typer) = &mut typer {
-                    typer.increase_typer = false;
-                }
+                typer.increase_typer = false;
                 galpha = 0.;
                 skipping = true;
                 if soul.time >= soul.get_max_time() {
@@ -608,9 +702,14 @@ fn main() {
                     soul.momentum = 0.;
                 }
             }
-            let is_skip_pressed = d.is_key_down(KeyboardKey::KEY_X)
-                || d.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
-                || d.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT);
+            let is_skip_pressed = patchfile_count > 0
+                && d.as_ref()
+                    .map(|d| {
+                        d.is_key_down(KeyboardKey::KEY_X)
+                            || d.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
+                            || d.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT)
+                    })
+                    .unwrap_or(true);
             /*{
                 let f = files.keys().filter(|x| x.starts_with("goners/")).collect::<Vec<_>>();
                 if d.is_key_down(KeyboardKey::KEY_A) {
@@ -633,61 +732,80 @@ fn main() {
                             + (delta * (if is_skip_pressed { 2. } else { 1. })))
                         .min(1.);
                     }
-                    if galpha <= -1. && inst_alpha >= 1. {
-                        state = PatcherState::StartTalkA;
+                    if args.cli || (galpha <= -1. && inst_alpha >= 1.) {
+                        if args.cli {
+                            galpha = -1.;
+                            inst_alpha = 1.;
+                        }
+                        state = if patchfile_count == 0 {
+                            PatcherState::MissingFiles
+                        } else {
+                            PatcherState::StartTalkA
+                        };
+                    }
+                }
+                PatcherState::MissingFiles => {
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.pos.y = 100.;
+                        typer.start("FALTAN ARCHIVOS CLAVE^^10\nPARA REALIZAR\nLA CONVERSIÓN.^^10\n\nLA CONEXIÓN SE CANCELARÁ.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            galpha = 3.;
+                            state = PatcherState::CloseTimed;
+                        }
                     }
                 }
                 PatcherState::StartTalkA => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start(if cfg!(feature = "uninstaller") {
-                                "VEO QUE QUIERES^^10\nCORTAR LA CONEXIÓN."
-                            } else {
-                                "¿ESTÁS^^10 AHÍ?"
-                            });
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                state = PatcherState::StartTalkB;
-                            }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start(if cfg!(feature = "uninstaller") {
+                            "VEO QUE QUIERES^^10\nCORTAR LA CONEXIÓN."
+                        } else {
+                            "¿ESTÁS^^10 AHÍ?"
+                        });
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = PatcherState::StartTalkB;
                         }
                     }
                 }
                 PatcherState::StartTalkB => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start(if cfg!(feature = "uninstaller") {
-                                "ACEPTO TU DECISIÓN."
-                            } else {
-                                "¿ESTAMOS^^10 CONECTADOS?"
-                            });
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                #[cfg(not(feature = "uninstaller"))]
-                                {
-                                    state = PatcherState::SoulEntrance;
-                                    if let Some(aud) = &aud_appearance {
-                                        aud.play();
-                                    }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start(if cfg!(feature = "uninstaller") {
+                            "ACEPTO TU DECISIÓN."
+                        } else {
+                            "¿ESTAMOS^^10 CONECTADOS?"
+                        });
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            #[cfg(not(feature = "uninstaller"))]
+                            {
+                                state = PatcherState::SoulEntrance;
+                                if let Some(aud) = &aud_appearance {
+                                    aud.play();
                                 }
-                                #[cfg(feature = "uninstaller")]
-                                {
-                                    state = if let Some(drp) = transform_deltarune_path(&folder) {
-                                        *deltarune_path.lock() = Some(drp);
-                                        PatcherState::UninstallPrompt
-                                    } else {
-                                        folder.clear();
-                                        deltarune_path.lock().take();
-                                        debug!("CLEAR FOLDER (2)");
-                                        PatcherState::FindFolder
-                                    }
+                            }
+                            #[cfg(feature = "uninstaller")]
+                            {
+                                state = if let Some(drp) = transform_deltarune_path(&folder) {
+                                    *deltarune_path.lock() = Some(drp);
+                                    PatcherState::UninstallPrompt
+                                } else {
+                                    folder.clear();
+                                    deltarune_path.lock().take();
+                                    debug!("CLEAR FOLDER (2)");
+                                    PatcherState::FindFolder
                                 }
                             }
                         }
@@ -695,8 +813,8 @@ fn main() {
                 }
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::SoulEntrance => {
-                    if soul.time > soul.get_max() {
-                        if galpha > 0. {
+                    if soul.time > soul.get_max() || args.cli {
+                        if galpha > 0. && !args.cli {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                         } else {
                             state = PatcherState::StartTalkC;
@@ -707,41 +825,40 @@ fn main() {
                 }
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::StartTalkC => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.pos.y = 100.;
-                            typer.start("EXCELENTE.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                state = PatcherState::StartTalkD;
-                            }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.pos.y = 100.;
+                        if args.interactive {
+                            println!();
+                        }
+                        typer.start("EXCELENTE.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = PatcherState::StartTalkD;
                         }
                     }
                 }
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::StartTalkD => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start("PODEMOS^^10 COMENZAR.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                state = PatcherState::SoulExit;
-                                idr_time = Instant::now();
-                                play_another_him = true;
-                                galpha = 0.;
-                                soul.momentum = -0.5;
-                                soul.time = soul.get_max_time();
-                                if let Some(aud) = &aud_appearance {
-                                    aud.play();
-                                }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("PODEMOS^^10 COMENZAR.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = PatcherState::SoulExit;
+                            idr_time = Instant::now();
+                            play_another_him = true;
+                            galpha = 0.;
+                            soul.momentum = -0.5;
+                            soul.time = soul.get_max_time();
+                            if let Some(aud) = &aud_appearance {
+                                aud.play();
                             }
                         }
                     }
@@ -756,11 +873,7 @@ fn main() {
                         pitch_another_him =
                             (pitch_another_him + 0.02 * (delta / (1. / 30.))).min(0.96);
                     }
-                    if let Some(typer) = &mut typer
-                        && galpha >= 1.
-                        && pitch_another_him >= 0.96
-                        && inst_alpha <= 0.
-                    {
+                    if galpha >= 1. && pitch_another_him >= 0.96 && inst_alpha <= 0. {
                         typer.pos.y = 100.;
                         skipping = false;
                         state = if skipped {
@@ -774,81 +887,93 @@ fn main() {
                 }
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::StartTalkE => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start("AHORA.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                state = PatcherState::StartPatchQuestion;
-                            }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("AHORA.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = PatcherState::StartPatchQuestion;
                         }
                     }
                 }
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::StartPatchQuestion => {
-                    if let Some(typer) = &mut typer {
-                        if !args.no_question_gui && !typer.playing {
-                            typer.start(
-                                "¿DESEAS INICIAR^^10\nLA CONVERSIÓN^^10\nDE FORMA AUTOMÁTICA?",
-                            );
-                            galpha = 2.;
-                            qoption = 0;
-                            qalpha = 0.;
-                            qanswered = false;
-                        } else {
-                            if !args.no_question_gui && !qanswered {
-                                qalpha = (qalpha + delta).min(1.);
-                                if d.is_key_down(KeyboardKey::KEY_Z)
-                                    || d.is_key_down(KeyboardKey::KEY_ENTER)
-                                    || d.is_key_down(KeyboardKey::KEY_KP_ENTER)
-                                {
-                                    qanswered = true;
-                                }
+                    if !args.no_question_gui && !typer.playing {
+                        typer.start("¿DESEAS INICIAR^^10\nLA CONVERSIÓN A TRAVÉS^^10\nDE LA CARPETA DE STEAM?");
+                        galpha = 2.;
+                        qoption = 0;
+                        qalpha = 0.;
+                        qanswered = false;
+                    } else {
+                        if args.interactive && !qanswered {
+                            print!("Respuesta (SÍ/no): ");
+                            std::io::stdout().flush().unwrap();
+                            let mut l = String::new();
+                            std::io::stdin().read_line(&mut l).unwrap();
+                            let l = l.trim().to_lowercase();
+                            if l == "y" || l == "s" || l == "sí" || l == "si" || l.is_empty() {
+                                println!(">> sí");
+                                qanswered = true;
+                                qoption = 0;
+                            } else if l == "n" || l == "no" {
+                                println!(">> no");
+                                qanswered = true;
+                                qoption = 1;
                             } else {
-                                qalpha = (qalpha - delta).max(0.);
+                                println!("Respuesta inválida.");
                             }
-                            if args.no_question_gui || (typer.is_finished() && qanswered) {
-                                if !args.no_question_gui && galpha > -1. {
-                                    galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else if !args.no_question_gui && !qanswered {
+                            qalpha = (qalpha + delta).min(1.);
+                            if let Some(d) = &d
+                                && (d.is_key_down(KeyboardKey::KEY_Z)
+                                    || d.is_key_down(KeyboardKey::KEY_ENTER)
+                                    || d.is_key_down(KeyboardKey::KEY_KP_ENTER))
+                            {
+                                qanswered = true;
+                            }
+                        } else {
+                            qalpha = (qalpha - delta).max(0.);
+                        }
+                        if args.no_question_gui || (typer.is_finished() && qanswered) {
+                            if !args.no_question_gui && galpha > -1. {
+                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                            } else {
+                                typer.stop();
+                                state = if qoption == 0
+                                    && let Some(mp) = transform_deltarune_path(&folder)
+                                {
+                                    *deltarune_path.lock() = Some(mp);
+                                    PatcherState::Patch
                                 } else {
-                                    typer.stop();
-                                    state = if qoption == 0
-                                        && let Some(mp) = transform_deltarune_path(&folder)
-                                    {
-                                        *deltarune_path.lock() = Some(mp);
-                                        PatcherState::Patch
-                                    } else {
-                                        debug!("CLEAR FOLDER (1)");
-                                        PatcherState::RefuseStartPatch
-                                    };
-                                }
+                                    debug!("CLEAR FOLDER (1)");
+                                    PatcherState::RefuseStartPatch
+                                };
                             }
                         }
                     }
                 }
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::RefuseStartPatch => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start("ENTENDIDO.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                state = PatcherState::FindFolder;
-                            }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("ENTENDIDO.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = PatcherState::FindFolder;
                         }
                     }
                 }
                 PatcherState::FindFolder => {
                     let mut lock = deltarune_path.lock();
-                    if d.is_file_dropped() {
+                    if let Some(d) = &d
+                        && d.is_file_dropped()
+                    {
                         for f in d.load_dropped_files().paths() {
                             if f.is_empty() {
                                 continue;
@@ -865,99 +990,138 @@ fn main() {
                             }
                         }
                     }
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.pos.y = 100.;
-                            typer.start("ARRASTRA LA CARPETA\nDE DELTARUNE^^10\nA ESTA VENTANA.");
-                        } else if typer.is_finished()
-                            && let Some(data) = lock.as_ref()
-                        {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.pos.y = 100.;
+                        typer.start(if args.interactive { "ARRASTRA LA CARPETA DE DELTARUNE A ESTA VENTANA, U EN SU DEFECTO INTRODUZCA LA RUTA DE LA CARPETA DE DELTARUNE." } else { "ARRASTRA LA CARPETA\nDE DELTARUNE^^10\nA ESTA VENTANA." });
+                    } else if (typer.is_finished() || args.interactive)
+                        && let Some(data) = lock.as_ref()
+                    {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = if !data.path.is_empty() {
+                                PatcherState::DeltaruneFound
                             } else {
-                                typer.stop();
-                                state = if !data.path.is_empty() {
-                                    PatcherState::DeltaruneFound
-                                } else {
-                                    PatcherState::DeltaruneNotFound
-                                };
+                                PatcherState::DeltaruneNotFound
+                            };
+                        }
+                    } else if args.interactive {
+                        print!("Respuesta (camino del programa): ");
+                        std::io::stdout().flush().unwrap();
+                        let mut l = String::new();
+                        std::io::stdin().read_line(&mut l).unwrap();
+                        l = l.replace("\r", "").replace("\n", "");
+                        for c in ['\'', '"'] {
+                            if l.starts_with(c) && l.ends_with(c) {
+                                l = l[1..(l.len() - 1)].to_string();
                             }
                         }
+
+                        *lock = transform_deltarune_path(&PathBuf::from(l))
+                            .unwrap_or(DeltarunePath {
+                                path: PathBuf::new(),
+                                os: DeltaruneOsKind::default(),
+                            })
+                            .into();
+                        debug!("UPDATE FOLDER");
                     }
                 }
                 PatcherState::DeltaruneNotFound => {
                     deltarune_path.lock().take();
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
+                    if !typer.playing {
+                        galpha = 2.;
+                        #[cfg(feature = "uninstaller")]
+                        {
+                            typer.start("DELTAESP^^10\nNO FUE ENCONTRADO.");
+                        }
+                        #[cfg(not(feature = "uninstaller"))]
+                        {
                             typer.start("DELTARUNE^^10\nNO FUE ENCONTRADO.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                state = PatcherState::FindFolder;
-                            }
+                        }
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = PatcherState::FindFolder;
                         }
                     }
                 }
                 PatcherState::DeltaruneFound => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start("EXCELENTE.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("EXCELENTE.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
 
-                                #[cfg(not(feature = "uninstaller"))]
-                                {
-                                    state = PatcherState::Patch;
-                                }
-                                #[cfg(feature = "uninstaller")]
-                                {
-                                    state = PatcherState::UninstallPrompt;
-                                }
+                            #[cfg(not(feature = "uninstaller"))]
+                            {
+                                state = PatcherState::Patch;
+                            }
+                            #[cfg(feature = "uninstaller")]
+                            {
+                                state = PatcherState::UninstallPrompt;
                             }
                         }
                     }
                 }
                 #[cfg(feature = "uninstaller")]
                 PatcherState::UninstallPrompt => {
-                    if let Some(typer) = &mut typer {
-                        if !args.no_question_gui && !typer.playing {
-                            typer.start("¿COMENZAR^^10\nLA ESCISIÓN?");
-                            galpha = 2.;
-                            qoption = 0;
-                            qalpha = 0.;
-                            qanswered = false;
-                        } else {
-                            if !args.no_question_gui && !qanswered {
-                                qalpha = (qalpha + delta).min(1.);
-                                if d.is_key_down(KeyboardKey::KEY_Z)
+                    if !args.no_question_gui && !typer.playing {
+                        typer.start("¿COMENZAR^^10\nLA ESCISIÓN?");
+                        galpha = 2.;
+                        qoption = 0;
+                        qalpha = 0.;
+                        qanswered = false;
+                    } else {
+                        if !args.no_question_gui && !qanswered {
+                            qalpha = (qalpha + delta).min(1.);
+                            if let Some(d) = &d
+                                && (d.is_key_down(KeyboardKey::KEY_Z)
                                     || d.is_key_down(KeyboardKey::KEY_ENTER)
-                                    || d.is_key_down(KeyboardKey::KEY_KP_ENTER)
-                                {
+                                    || d.is_key_down(KeyboardKey::KEY_KP_ENTER))
+                            {
+                                qanswered = true;
+                            } else if args.interactive {
+                                qalpha = 1.;
+                                print!("Respuesta (SÍ/no): ");
+                                std::io::stdout().flush().unwrap();
+                                let mut l = String::new();
+                                std::io::stdin().read_line(&mut l).unwrap();
+                                let l = l.trim().to_lowercase();
+                                if l == "y" || l == "s" || l == "sí" || l == "si" || l.is_empty() {
+                                    println!(">> sí");
                                     qanswered = true;
-                                }
-                            } else {
-                                qalpha = (qalpha - delta).max(0.);
-                            }
-                            if args.no_question_gui || (typer.is_finished() && qanswered) {
-                                if !args.no_question_gui && galpha > -1. {
-                                    galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                                    qoption = 0;
+                                } else if l == "n" || l == "no" {
+                                    println!(">> no");
+                                    qanswered = true;
+                                    qoption = 1;
                                 } else {
-                                    typer.stop();
-                                    state = if qoption == 0 {
-                                        PatcherState::Uninstalling
-                                    } else {
-                                        deltarune_path.lock().take();
-                                        PatcherState::EndKeptTalkA
-                                    };
+                                    println!("Respuesta inválida.");
                                 }
+                            }
+                        } else {
+                            qalpha = (qalpha - delta).max(0.);
+                        }
+                        if args.no_question_gui
+                            || ((typer.is_finished() || args.interactive) && qanswered)
+                        {
+                            if !args.no_question_gui && galpha > -1. {
+                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                            } else {
+                                typer.stop();
+                                state = if qoption == 0 {
+                                    PatcherState::Uninstalling
+                                } else {
+                                    deltarune_path.lock().take();
+                                    PatcherState::EndKeptTalkA
+                                };
                             }
                         }
                     }
@@ -971,60 +1135,13 @@ fn main() {
                             let progress = progress.clone();
                             let deltarune_path = deltarune_path.lock().clone();
                             let typer_progress = typer_progress.clone();
-                            let args = args.clone();
+                            let patch_dirs = patch_dirs.clone();
                             patch_task = Some(std::thread::spawn(move || {
                                 *progress.lock() = "Desinstalando parche...".into();
                                 let deltarune_path = deltarune_path.unwrap(); // just in case do it here lol
-                                let init_path = if let Some(p) = &args.patch_path {
-                                    p.clone()
-                                } else {
-                                    let mut p = std::env::current_dir().unwrap();
-                                    p.push("patch");
-                                    p
-                                };
-                                let mut dirs = vec![init_path];
-                                let comp_count = dirs[0].components().count();
-                                let mut count = 0usize;
-                                {
-                                    let mut dirs = dirs.clone();
-                                    while let Some(dir) = dirs.pop() {
-                                        if let Ok(d) = fs::read_dir(dir) {
-                                            for f in d.flatten() {
-                                                let Ok(ft) = f.file_type() else {
-                                                    continue;
-                                                };
-                                                if ft.is_dir() {
-                                                    let dir = f.path();
-                                                    let fname = dir
-                                                        .file_name()
-                                                        .unwrap_or_default()
-                                                        .to_string_lossy();
-                                                    if fname != "mac" && fname != "switch" {
-                                                        dirs.push(dir);
-                                                    }
-                                                    continue;
-                                                }
-                                                count += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                                debug!("count! {count}");
+                                let comp_count = patch_dirs[0].components().count();
                                 let mut done = 0usize;
-                                while let Some(dir) = dirs.pop() {
-                                    if let Ok(d) = fs::read_dir(&dir) {
-                                        for f in d.flatten() {
-                                            let Ok(ft) = f.file_type() else {
-                                                continue;
-                                            };
-                                            let p = f.path();
-                                            let fname =
-                                                p.file_name().unwrap_or_default().to_string_lossy();
-                                            if ft.is_dir() && fname != "mac" && fname != "switch" {
-                                                dirs.push(p);
-                                            }
-                                        }
-                                    }
+                                for dir in patch_dirs {
                                     // ensure that the folder exists in the output destination...
                                     let _ = fs::create_dir_all(&dir);
                                     if let Ok(d) = fs::read_dir(&dir) {
@@ -1142,7 +1259,7 @@ fn main() {
                                             done += 1;
                                             let tp = *typer_progress.lock();
                                             *typer_progress.lock() =
-                                                tp.max(done as f32 / count as f32);
+                                                tp.max(done as f32 / patchfile_count as f32);
                                         }
                                     }
                                 }
@@ -1151,9 +1268,7 @@ fn main() {
                             }));
                         }
                     }
-                    if let Some(typer) = &mut typer
-                        && !typer.playing
-                    {
+                    if !typer.playing {
                         galpha = 2.;
                         goner_alpha = galpha;
                         typer.start("LA ESCISIÓN^^10\nESTÁ TOMANDO LUGAR.");
@@ -1161,18 +1276,16 @@ fn main() {
                         .as_ref()
                         .map(|x| x.is_finished())
                         .unwrap_or(false)
-                        && (args.cli || typer.as_ref().map(|x| x.is_finished()).unwrap_or(false))
+                        && ((args.cli && !args.interactive) || typer.is_finished())
                     {
                         if galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                         } else {
                             *progress.lock() = String::new();
-                            if let Some(typer) = &mut typer {
-                                typer.stop();
-                            }
+                            typer.stop();
                             if let Some(pt) = patch_task.take()
                                 && let Err(e) = pt.join()
-                                && !args.cli
+                                && !(args.cli && !args.interactive)
                             {
                                 let mut f =
                                     BufWriter::new(File::create("uninstalling_error.txt").unwrap());
@@ -1180,7 +1293,7 @@ fn main() {
                                 f.flush().unwrap();
                             }
                             state = PatcherState::EndUninstalledTalkA;
-                            if args.cli {
+                            if args.cli && !args.interactive {
                                 break;
                             }
                         }
@@ -1189,14 +1302,17 @@ fn main() {
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::Patch => {
                     if patch_task.is_none() {
-                        if !files.is_empty() {
+                        if !files.is_empty()
+                            && let Some(d) = &mut d
+                            && let Some(thread) = &thread
+                        {
                             let f = files
                                 .keys()
                                 .filter(|x| x.starts_with("goners/"))
                                 .collect::<Vec<_>>();
                             goner = Some(
                                 d.load_texture_from_image(
-                                    &thread,
+                                    thread,
                                     &Image::load_image_from_mem(
                                         ".png",
                                         &files[f[rand::random_range(0..f.len())]],
@@ -1212,60 +1328,13 @@ fn main() {
                             let progress = progress.clone();
                             let deltarune_path = deltarune_path.lock().clone();
                             let typer_progress = typer_progress.clone();
-                            let args = args.clone();
+                            let patch_dirs = patch_dirs.clone();
                             patch_task = Some(std::thread::spawn(move || {
                                 *progress.lock() = "Inicializando parche...".into();
                                 let deltarune_path = deltarune_path.unwrap(); // just in case do it here lol
-                                let init_path = if let Some(p) = &args.patch_path {
-                                    p.clone()
-                                } else {
-                                    let mut p = std::env::current_dir().unwrap();
-                                    p.push("patch");
-                                    p
-                                };
-                                let mut dirs = vec![init_path.clone()];
-                                let comp_count = dirs[0].components().count();
-                                let mut count = 0usize;
-                                {
-                                    let mut dirs = dirs.clone();
-                                    while let Some(dir) = dirs.pop() {
-                                        if let Ok(d) = fs::read_dir(dir) {
-                                            for f in d.flatten() {
-                                                let Ok(ft) = f.file_type() else {
-                                                    continue;
-                                                };
-                                                if ft.is_dir() {
-                                                    let dir = f.path();
-                                                    let fname = dir
-                                                        .file_name()
-                                                        .unwrap_or_default()
-                                                        .to_string_lossy();
-                                                    if fname != "mac" && fname != "switch" {
-                                                        dirs.push(dir);
-                                                    }
-                                                    continue;
-                                                }
-                                                count += 1;
-                                            }
-                                        }
-                                    }
-                                }
-                                info!("count! {count}");
+                                let comp_count = patch_dirs[0].components().count();
                                 let mut done = 0usize;
-                                while let Some(dir) = dirs.pop() {
-                                    if let Ok(d) = fs::read_dir(&dir) {
-                                        for f in d.flatten() {
-                                            let Ok(ft) = f.file_type() else {
-                                                continue;
-                                            };
-                                            let p = f.path();
-                                            let fname =
-                                                p.file_name().unwrap_or_default().to_string_lossy();
-                                            if ft.is_dir() && fname != "mac" && fname != "switch" {
-                                                dirs.push(p);
-                                            }
-                                        }
-                                    }
+                                for dir in patch_dirs {
                                     // ensure that the folder exists in the output destination...
                                     let _ = fs::create_dir_all(&dir);
                                     if let Ok(d) = fs::read_dir(&dir) {
@@ -1514,7 +1583,7 @@ fn main() {
                                             done += 1;
                                             let tp = *typer_progress.lock();
                                             *typer_progress.lock() =
-                                                tp.max(done as f32 / count as f32);
+                                                tp.max(done as f32 / patchfile_count as f32);
                                         }
                                     }
                                 }
@@ -1524,9 +1593,7 @@ fn main() {
                             }));
                         }
                     }
-                    if let Some(typer) = &mut typer
-                        && !typer.playing
-                    {
+                    if !typer.playing {
                         galpha = 2.;
                         goner_alpha = galpha;
                         typer.start("AHORA.^^10\nSE REALIZARÁ LA CONVERSIÓN.");
@@ -1534,18 +1601,16 @@ fn main() {
                         .as_ref()
                         .map(|x| x.is_finished())
                         .unwrap_or(false)
-                        && (args.cli || typer.as_ref().map(|x| x.is_finished()).unwrap_or(false))
+                        && ((args.cli && !args.interactive) || typer.is_finished())
                     {
-                        if !args.cli && galpha > -1. {
+                        if !(args.cli && !args.interactive) && galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                         } else {
-                            if let Some(typer) = &mut typer {
-                                typer.stop();
-                            }
+                            typer.stop();
                             let mut success = false;
                             if let Some(pt) = patch_task.take() {
                                 if let Err(e) = pt.join()
-                                    && !args.cli
+                                    && !(args.cli && !args.interactive)
                                 {
                                     let mut f =
                                         BufWriter::new(File::create("patching_error.txt").unwrap());
@@ -1563,7 +1628,7 @@ fn main() {
                             } else {
                                 PatcherState::PatchFailed
                             };
-                            if args.cli {
+                            if args.cli && !args.interactive {
                                 break;
                             }
                         }
@@ -1575,39 +1640,35 @@ fn main() {
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::PatchFailed => {
                     let mut go_lower = true;
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            goner = Some(
-                                d.load_texture_from_image(
-                                    &thread,
-                                    &Image::load_image_from_mem(".png", &files["error.png"])
-                                        .unwrap(),
-                                )
-                                .unwrap(),
-                            );
-                            *typer_progress.lock() = 1.;
-                            galpha = 2.;
-                            typer.start("LA CONVERSIÓN^5 HA FALLADO.^^10\nASEGÚRATE^5 DE TENER LOS^^10\nARCHIVOS ORIGINALES.");
-                        } else if typer.is_finished() {
-                            go_lower = false;
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else if pitch_another_him >= 0.96 {
-                                typer.stop();
-                                debug!("CLEAR FOLDER");
-                                folder = PathBuf::new();
-                                deltarune_path.lock().take();
-                                state = PatcherState::FindFolder;
-                            }
-                            goner_alpha = galpha;
+                    if !typer.playing {
+                        if !files.is_empty()
+                            && let Some(d) = &mut d
+                            && let Some(thread) = &thread
+                            && let Ok(i) = Image::load_image_from_mem(".png", &files["error.png"])
+                        {
+                            goner = Some(d.load_texture_from_image(thread, &i).unwrap());
                         }
+                        *typer_progress.lock() = 1.;
+                        galpha = 2.;
+                        typer.start("LA CONVERSIÓN^5 HA FALLADO.^^10\nASEGÚRATE^5 DE TENER LOS^^10\nARCHIVOS ORIGINALES.");
+                    } else if typer.is_finished() {
+                        go_lower = false;
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else if pitch_another_him >= 0.96 {
+                            typer.stop();
+                            debug!("CLEAR FOLDER");
+                            folder = PathBuf::new();
+                            deltarune_path.lock().take();
+                            state = PatcherState::FindFolder;
+                        }
+                        goner_alpha = galpha;
                     }
 
                     if go_lower {
                         if pitch_another_him > 0.02 {
-                            pitch_another_him = (pitch_another_him
-                                - (0.02 * (d.get_frame_time() / (1. / 30.))))
-                                .max(0.02);
+                            pitch_another_him =
+                                (pitch_another_him - (0.02 * (delta / (1. / 30.)))).max(0.02);
                         } else {
                             play_another_him = false;
                         }
@@ -1616,25 +1677,22 @@ fn main() {
                             play_another_him = true;
                         }
                         if pitch_another_him < 0.96 {
-                            pitch_another_him = (pitch_another_him
-                                + (0.02 * (d.get_frame_time() / (1. / 30.))))
-                                .min(0.96);
+                            pitch_another_him =
+                                (pitch_another_him + (0.02 * (delta / (1. / 30.)))).min(0.96);
                         }
                     }
                 }
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::PatchSuccess => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start("LA CONVERSIÓN.^^10\nFUE REALIZADA^5 CON ÉXITO.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                state = PatcherState::EndTalkA;
-                            }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("LA CONVERSIÓN.^^10\nFUE REALIZADA^5 CON ÉXITO.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = PatcherState::EndTalkA;
                         }
                     }
                 }
@@ -1642,7 +1700,7 @@ fn main() {
                 PatcherState::EndTalkA => {
                     if args.skip_outro_gui {
                         break;
-                    } else if let Some(typer) = &mut typer {
+                    } else {
                         if !typer.playing {
                             galpha = 2.;
                             typer.start(&format!(
@@ -1663,9 +1721,8 @@ fn main() {
                     }
 
                     if pitch_another_him > 0.02 {
-                        pitch_another_him = (pitch_another_him
-                            - (0.02 * (d.get_frame_time() / (1. / 30.))))
-                            .max(0.02);
+                        pitch_another_him =
+                            (pitch_another_him - (0.02 * (delta / (1. / 30.)))).max(0.02);
                     } else {
                         play_another_him = false;
                     }
@@ -1674,7 +1731,7 @@ fn main() {
                 PatcherState::EndUninstalledTalkA => {
                     if args.skip_outro_gui {
                         break;
-                    } else if let Some(typer) = &mut typer {
+                    } else {
                         if !typer.playing {
                             galpha = 2.;
                             typer.start("ESTÁ HECHO.");
@@ -1690,61 +1747,57 @@ fn main() {
                 }
                 #[cfg(feature = "uninstaller")]
                 PatcherState::EndUninstalledTalkB => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start("ESPERO^^10\nVOLVERTE A VER PRONTO.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                galpha = 3.;
-                                state = PatcherState::CloseTimed;
-                            }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("ESPERO^^10\nVOLVERTE A VER PRONTO.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            galpha = 3.;
+                            state = PatcherState::CloseTimed;
                         }
                     }
                 }
                 #[cfg(feature = "uninstaller")]
                 PatcherState::EndKeptTalkA => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start("ENTONCES^^10\nLA CONEXIÓN SE MANTENDRÁ.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                state = PatcherState::EndKeptTalkB;
-                            }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("ENTONCES^^10\nLA CONEXIÓN SE MANTENDRÁ.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            state = PatcherState::EndKeptTalkB;
                         }
                     }
                 }
                 #[cfg(feature = "uninstaller")]
                 PatcherState::EndKeptTalkB => {
-                    if let Some(typer) = &mut typer {
-                        if !typer.playing {
-                            galpha = 2.;
-                            typer.start("NOS VEMOS.");
-                        } else if typer.is_finished() {
-                            if galpha > -1. {
-                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                            } else {
-                                typer.stop();
-                                galpha = 3.;
-                                state = PatcherState::CloseTimed;
-                            }
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("NOS VEMOS.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            galpha = 3.;
+                            state = PatcherState::CloseTimed;
                         }
                     }
                 }
                 PatcherState::CloseTimed => {
                     if idr.is_empty() {
                         if galpha > 0. {
-                            galpha -= d.get_frame_time();
+                            galpha -= delta;
                         } else {
                             #[cfg(feature = "uninstaller")]
-                            if show_friend && !shown_friend {
+                            if args.interactive {
+                                close = true;
+                            } else if show_friend && !shown_friend {
                                 shown_friend = true;
                                 if let Some(aud) = &aud_face {
                                     aud.play();
@@ -1777,8 +1830,7 @@ fn main() {
                 #[cfg(not(feature = "uninstaller"))]
                 {
                     cond = state >= PatcherState::StartTalkE
-                        && (state != PatcherState::PatchFailed
-                            || typer.as_ref().map(|x| x.is_finished()).unwrap_or(false))
+                        && (state != PatcherState::PatchFailed || typer.is_finished())
                         && state < PatcherState::EndTalkA;
                 }
                 #[cfg(feature = "uninstaller")]
@@ -1807,106 +1859,125 @@ fn main() {
                     7.
                 }
             };
-            for idr_item in (0..idr.len()).rev() {
-                if idr[idr_item].draw(&img_depth_tex, &mut d, mult) {
-                    idr.remove(idr_item);
+            if let Some(d) = &mut d {
+                for idr_item in (0..idr.len()).rev() {
+                    if idr[idr_item].draw(&img_depth_tex, &mut *d, mult) {
+                        idr.remove(idr_item);
+                    }
                 }
+            } else {
+                idr.clear();
             }
             #[cfg(not(feature = "uninstaller"))]
-            if state >= PatcherState::SoulEntrance {
-                soul.draw(&mut d);
+            if let Some(d) = &mut d
+                && state >= PatcherState::SoulEntrance
+                && state != PatcherState::CloseTimed
+            {
+                soul.draw(&mut *d);
             }
             let alpha = (timer.elapsed().as_secs_f32() * 2.).sin() * 0.2 + 0.6;
             let fake_galpha = if skipping { 1. } else { galpha };
             //info!("galpha={fake_galpha:.2} falpha={falpha:.2} final={:.2}", fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
-            if let Some(typer) = &mut typer {
-                typer.draw(
-                    &mut d,
-                    alpha,
-                    fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.),
-                );
+            typer.draw(
+                &mut d,
+                alpha,
+                fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.),
+            );
+            {
+                let cond;
+                #[cfg(not(feature = "uninstaller"))]
                 {
-                    let cond;
-                    #[cfg(not(feature = "uninstaller"))]
-                    {
-                        cond = state == PatcherState::Patch;
-                    }
-                    #[cfg(feature = "uninstaller")]
-                    {
-                        cond = state == PatcherState::Uninstalling;
-                    }
-                    if cond && galpha > 0. {
-                        typer.draw_text_centered_half_part(
-                            &mut d,
-                            Vector2::new(
-                                320.,
-                                typer.pos.y
-                                    + typer.fnt.measure_text(typer.get_text(), 32., 8.).y
-                                    + 20.,
-                            ),
-                            &progress.lock(),
+                    cond = state == PatcherState::Patch;
+                }
+                #[cfg(feature = "uninstaller")]
+                {
+                    cond = state == PatcherState::Uninstalling;
+                }
+                if let Some(d) = &mut d
+                    && cond
+                    && galpha > 0.
+                {
+                    typer.draw_text_centered_half_part(
+                        &mut *d,
+                        Vector2::new(
+                            320.,
+                            typer.pos.y
+                                + typer
+                                    .fnt
+                                    .as_ref()
+                                    .map(|fnt| fnt.measure_text(typer.get_text(), 32., 8.).y)
+                                    .unwrap_or(0.)
+                                + 20.,
+                        ),
+                        &progress.lock(),
+                        usize::MAX,
+                        alpha,
+                        galpha.clamp(0., 1.),
+                    );
+                }
+            }
+            {
+                let cond;
+                #[cfg(not(feature = "uninstaller"))]
+                {
+                    cond = state == PatcherState::StartPatchQuestion;
+                }
+                #[cfg(feature = "uninstaller")]
+                {
+                    cond = state == PatcherState::UninstallPrompt;
+                }
+                if let Some(d) = &mut d
+                    && cond
+                {
+                    let qs = ["SÍ", "NO"];
+                    for (i, &q) in qs.iter().enumerate() {
+                        typer.draw_text_centered_part(
+                            &mut *d,
+                            Vector2::new(320., 260. + (i as f32 * 40.)),
+                            q,
                             usize::MAX,
                             alpha,
                             galpha.clamp(0., 1.),
+                            if i == qoption {
+                                Color::YELLOW
+                            } else {
+                                Color::WHITE
+                            }
+                            .alpha(qalpha),
                         );
                     }
-                }
-                {
-                    let cond;
-                    #[cfg(not(feature = "uninstaller"))]
-                    {
-                        cond = state == PatcherState::StartPatchQuestion;
-                    }
-                    #[cfg(feature = "uninstaller")]
-                    {
-                        cond = state == PatcherState::UninstallPrompt;
-                    }
-                    if cond {
-                        let qs = ["SÍ", "NO"];
-                        for (i, &q) in qs.iter().enumerate() {
-                            typer.draw_text_centered_part(
-                                &mut d,
-                                Vector2::new(320., 260. + (i as f32 * 40.)),
-                                q,
-                                usize::MAX,
-                                alpha,
-                                galpha.clamp(0., 1.),
-                                if i == qoption {
-                                    Color::YELLOW
-                                } else {
-                                    Color::WHITE
-                                }
-                                .alpha(qalpha),
-                            );
-                        }
-                        if !qanswered {
-                            if d.is_key_pressed(KeyboardKey::KEY_DOWN) {
-                                qoption += 1;
-                                if qoption >= qs.len() {
-                                    qoption = 0;
-                                }
-                            } else if d.is_key_pressed(KeyboardKey::KEY_UP) {
-                                if qoption > 0 {
-                                    qoption -= 1;
-                                } else {
-                                    qoption = qs.len() - 1;
-                                }
+                    if !qanswered {
+                        if d.is_key_pressed(KeyboardKey::KEY_DOWN) {
+                            qoption += 1;
+                            if qoption >= qs.len() {
+                                qoption = 0;
+                            }
+                        } else if d.is_key_pressed(KeyboardKey::KEY_UP) {
+                            if qoption > 0 {
+                                qoption -= 1;
+                            } else {
+                                qoption = qs.len() - 1;
                             }
                         }
                     }
                 }
-                #[cfg(not(feature = "uninstaller"))]
-                if inst_alpha > 0. {
-                    typer.draw_text_half(
-                        &mut d,
-                        Vector2::new(10., 10.),
-                        "Presiona [X/SHIFT] para ir más rápido.\nPresiona [C/CTRL] para saltar la intro.",
-                        alpha,
-                        inst_alpha,
-                    );
-                }
             }
-            if let Some(goner) = goner.as_ref() {
+            #[cfg(not(feature = "uninstaller"))]
+            if patchfile_count > 0
+                && let Some(d) = &mut d
+                && inst_alpha > 0.
+            {
+                typer.draw_text_half(
+                    &mut *d,
+                    Vector2::new(10., 10.),
+                    "Presiona [X/SHIFT] para ir más rápido.\nPresiona [C/CTRL] para saltar la intro.",
+                    alpha,
+                    inst_alpha,
+                );
+            }
+            if let Some(d) = &mut d
+                && let Some(goner) = goner.as_ref()
+            {
                 let mut scale = 1.;
                 while (goner.height as f32 * (scale + 0.5)) < 200. {
                     scale += 0.5;
@@ -1931,7 +2002,10 @@ fn main() {
                 );
             }
             #[cfg(feature = "uninstaller")]
-            if shown_friend && let Some(img_friend) = &img_friend {
+            if let Some(d) = &mut d
+                && shown_friend
+                && let Some(img_friend) = &img_friend
+            {
                 d.draw_texture_pro(
                     img_friend,
                     Rectangle::new(0., 0., img_friend.width as _, img_friend.height as _),
@@ -1949,6 +2023,13 @@ fn main() {
                     Color::WHITE,
                 );
                 friend_scale += delta;
+            }
+            {
+                let l = &*progress.lock();
+                if args.interactive && last_progress != *l {
+                    last_progress = l.clone();
+                    println!("{l}");
+                }
             }
         }
         //d.draw_fps(20, 20);
