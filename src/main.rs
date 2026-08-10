@@ -681,7 +681,7 @@ fn main() {
         .unwrap_or(false)
         && !close
     {
-        //println!("FRAME: {state:?} {galpha:.2} {inst_alpha:.2}");
+        //println!("FRAME: state={state:?} galpha={galpha:.2} inst_alpha={inst_alpha:.2}");
         let mut d = if let Some(rl) = &mut rl
             && let Some(thread) = &thread
         {
@@ -775,7 +775,10 @@ fn main() {
                     if galpha > -1. {
                         galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
                     }
-                    if skipped || args.cli || (galpha <= -1. && inst_alpha >= 1.) {
+                    if skipped
+                        || args.cli
+                        || (galpha <= -1. && (inst_alpha >= 1. || cfg!(feature = "uninstaller")))
+                    {
                         if skipped || args.cli {
                             galpha = 0.;
                         }
