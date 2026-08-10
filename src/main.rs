@@ -256,7 +256,7 @@ fn test_mac_path() {
     assert_eq!(drp.path, p);
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(i8)]
 #[cfg(feature = "uninstaller")]
 pub enum PatcherState {
@@ -275,12 +275,16 @@ pub enum PatcherState {
     EndKeptTalkB,
     CloseTimed,
 }
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(i8)]
 #[cfg(not(feature = "uninstaller"))]
 pub enum PatcherState {
     Init = -1,
     MissingFiles,
+    PatchUpdateA,
+    PatchUpdateB,
+    PatchUpdateC,
+    PatchUpdateD,
     StartTalkA,
     StartTalkB,
     SoulEntrance,
@@ -606,6 +610,38 @@ fn main() {
         p
     };
 
+    #[cfg(not(feature = "uninstaller"))]
+    let mut version_check = Some(std::thread::spawn(|| {
+        if let Ok(v) = reqwest::blocking::get("https://pastebin.com/raw/rgUf5fEq")
+            && let Ok(v) = v.text()
+        {
+            let v = v.trim();
+            let mut last_is_dot = true;
+            let mut valid = true;
+            for c in v.chars() {
+                if c == '.' {
+                    if last_is_dot {
+                        valid = false;
+                        break;
+                    }
+                    last_is_dot = true;
+                } else {
+                    last_is_dot = false;
+                    if !c.is_ascii_digit() {
+                        valid = false;
+                        break;
+                    }
+                }
+            }
+            if !valid {
+                return None;
+            }
+            Some(v.to_string())
+        } else {
+            None
+        }
+    }));
+
     let mut patchfile_count = 0usize;
     let mut patch_dirs = vec![init_path.clone()];
     {
@@ -683,23 +719,25 @@ fn main() {
                     || d.is_key_pressed(KeyboardKey::KEY_LEFT_CONTROL)
                     || d.is_key_pressed(KeyboardKey::KEY_RIGHT_CONTROL))
                 && state < PatcherState::SoulExit
+                && (state < PatcherState::PatchUpdateA || state > PatcherState::PatchUpdateD)
             {
                 skipped = true;
-                state = PatcherState::SoulExit;
-                idr_time = Instant::now();
-                play_another_him = true;
-                typer.increase_typer = false;
-                galpha = 0.;
-                skipping = true;
-                if soul.time >= soul.get_max_time() {
-                    soul.momentum = -0.5;
-                    soul.time = soul.get_max_time();
-                    if let Some(aud) = &aud_appearance {
-                        aud.play();
+                if state != PatcherState::Init {
+                    state = PatcherState::SoulExit;
+                    idr_time = Instant::now();
+                    play_another_him = true;
+                    typer.increase_typer = false;
+                    skipping = true;
+                    if soul.time >= soul.get_max_time() {
+                        soul.momentum = -0.5;
+                        soul.time = soul.get_max_time();
+                        if let Some(aud) = &aud_appearance {
+                            aud.play();
+                        }
+                    } else {
+                        soul.time = -100.;
+                        soul.momentum = 0.;
                     }
-                } else {
-                    soul.time = -100.;
-                    soul.momentum = 0.;
                 }
             }
             let is_skip_pressed = patchfile_count > 0
@@ -710,37 +748,70 @@ fn main() {
                             || d.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT)
                     })
                     .unwrap_or(true);
-            /*{
-                let f = files.keys().filter(|x| x.starts_with("goners/")).collect::<Vec<_>>();
-                if d.is_key_down(KeyboardKey::KEY_A) {
-                    goner = None;
-                    cl = (cl + 1) % f.len();
+            {
+                let cond;
+                #[cfg(not(feature = "uninstaller"))]
+                {
+                    cond = state < PatcherState::SoulExit
+                        && (state < PatcherState::PatchUpdateA
+                            || state > PatcherState::PatchUpdateD);
                 }
-                if goner.is_none() {
-                    goner = Some(d.load_texture_from_image(&thread, &Image::load_image_from_mem(".png", &files[f[cl]]).unwrap()).unwrap());
-                    goner_alpha = 1.;
-                    *typer_progress.lock() = 1.;
+                #[cfg(feature = "uninstaller")]
+                {
+                    cond = false;
                 }
-            }*/
-            match state {
-                PatcherState::Init => {
-                    if galpha > -1. {
-                        galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
-                    }
+                if cond {
                     if inst_alpha < 1. {
                         inst_alpha = (inst_alpha
                             + (delta * (if is_skip_pressed { 2. } else { 1. })))
                         .min(1.);
                     }
-                    if args.cli || (galpha <= -1. && inst_alpha >= 1.) {
-                        if args.cli {
-                            galpha = -1.;
-                            inst_alpha = 1.;
+                } else if inst_alpha > 0. {
+                    inst_alpha = (inst_alpha - delta).max(0.);
+                }
+            }
+            match state {
+                PatcherState::Init => {
+                    if galpha > -1. {
+                        galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                    }
+                    if skipped || args.cli || (galpha <= -1. && inst_alpha >= 1.) {
+                        if skipped || args.cli {
+                            galpha = 0.;
                         }
                         state = if patchfile_count == 0 {
                             PatcherState::MissingFiles
                         } else {
-                            PatcherState::StartTalkA
+                            #[allow(unused_mut, unused)]
+                            let mut ret = PatcherState::StartTalkA;
+                            #[cfg(not(feature = "uninstaller"))]
+                            let init = ret.clone();
+                            #[cfg(not(feature = "uninstaller"))]
+                            if let Some(Ok(Some(got_ver))) = version_check.take().map(|t| t.join())
+                                && let Ok(cur_ver) = fs::read("patch/version.txt")
+                                && String::from_utf8_lossy(&cur_ver).trim() != got_ver
+                            {
+                                ret = PatcherState::PatchUpdateA;
+                            }
+                            #[cfg(not(feature = "uninstaller"))]
+                            if skipped && init == ret {
+                                ret = PatcherState::SoulExit;
+                                idr_time = Instant::now();
+                                play_another_him = true;
+                                typer.increase_typer = false;
+                                skipping = true;
+                                if soul.time >= soul.get_max_time() {
+                                    soul.momentum = -0.5;
+                                    soul.time = soul.get_max_time();
+                                    if let Some(aud) = &aud_appearance {
+                                        aud.play();
+                                    }
+                                } else {
+                                    soul.time = -100.;
+                                    soul.momentum = 0.;
+                                }
+                            }
+                            ret
                         };
                     }
                 }
@@ -749,6 +820,109 @@ fn main() {
                         galpha = 2.;
                         typer.pos.y = 100.;
                         typer.start("FALTAN ARCHIVOS CLAVE^^10\nPARA REALIZAR\nLA CONVERSIÓN.^^10\n\nLA CONEXIÓN SE CANCELARÁ.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            galpha = 3.;
+                            state = PatcherState::CloseTimed;
+                        }
+                    }
+                }
+                #[cfg(not(feature = "uninstaller"))]
+                PatcherState::PatchUpdateA => {
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.pos.y = 100.;
+                        typer.start("FUE DETECTADA^^10\nUNA ACTUALIZACIÓN\nAL SISTEMA.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            galpha = 3.;
+                            state = PatcherState::PatchUpdateB;
+                        }
+                    }
+                }
+                #[cfg(not(feature = "uninstaller"))]
+                PatcherState::PatchUpdateB => {
+                    if !args.no_question_gui && !typer.playing {
+                        typer.start("¿DESEAS^^10 ADENTRARTE AL^5\nSITIO WEB?");
+                        galpha = 2.;
+                        qoption = 0;
+                        qalpha = 0.;
+                        qanswered = false;
+                    } else {
+                        if args.interactive && !qanswered {
+                            print!("Respuesta (SÍ/no): ");
+                            std::io::stdout().flush().unwrap();
+                            let mut l = String::new();
+                            std::io::stdin().read_line(&mut l).unwrap();
+                            let l = l.trim().to_lowercase();
+                            if l == "y" || l == "s" || l == "sí" || l == "si" || l.is_empty() {
+                                println!(">> sí");
+                                qanswered = true;
+                                qoption = 0;
+                            } else if l == "n" || l == "no" {
+                                println!(">> no");
+                                qanswered = true;
+                                qoption = 1;
+                            } else {
+                                println!("Respuesta inválida.");
+                            }
+                        } else if !args.no_question_gui && !qanswered {
+                            qalpha = (qalpha + delta).min(1.);
+                            if let Some(d) = &d
+                                && (d.is_key_down(KeyboardKey::KEY_Z)
+                                    || d.is_key_down(KeyboardKey::KEY_ENTER)
+                                    || d.is_key_down(KeyboardKey::KEY_KP_ENTER))
+                            {
+                                qanswered = true;
+                            }
+                        } else {
+                            qalpha = (qalpha - delta).max(0.);
+                        }
+                        if args.no_question_gui || (typer.is_finished() && qanswered) {
+                            if !args.no_question_gui && galpha > -1. {
+                                galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                            } else {
+                                typer.stop();
+                                state = if qoption == 0 {
+                                    if webbrowser::open("https://deltaesp.site").is_err() {
+                                        PatcherState::PatchUpdateC
+                                    } else {
+                                        galpha = 3.;
+                                        PatcherState::CloseTimed
+                                    }
+                                } else {
+                                    PatcherState::StartTalkA
+                                };
+                            }
+                        }
+                    }
+                }
+                #[cfg(not(feature = "uninstaller"))]
+                PatcherState::PatchUpdateC => {
+                    if !typer.playing {
+                        galpha = 2.;
+                        typer.start("FUE DETECTADO^^10 UN FALLO\nAL ADENTRARSE.");
+                    } else if typer.is_finished() {
+                        if galpha > -1. {
+                            galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
+                        } else {
+                            typer.stop();
+                            galpha = 3.;
+                            state = PatcherState::PatchUpdateD;
+                        }
+                    }
+                }
+                #[cfg(not(feature = "uninstaller"))]
+                PatcherState::PatchUpdateD => {
+                    if !typer.playing {
+                        galpha = 15.;
+                        typer.start("ENTRA A LA WEB^^10\nhttps://deltaesp.site^^10\nY ADÉNTRATE.");
                     } else if typer.is_finished() {
                         if galpha > -1. {
                             galpha -= delta * (if is_skip_pressed { 2. } else { 1. });
@@ -866,9 +1040,6 @@ fn main() {
                 #[cfg(not(feature = "uninstaller"))]
                 PatcherState::SoulExit => {
                     galpha += delta;
-                    if inst_alpha > 0. {
-                        inst_alpha = (inst_alpha - delta).max(0.);
-                    }
                     if pitch_another_him < 0.96 {
                         pitch_another_him =
                             (pitch_another_him + 0.02 * (delta / (1. / 30.))).min(0.96);
@@ -1289,7 +1460,13 @@ fn main() {
                             {
                                 let mut f =
                                     BufWriter::new(File::create("uninstalling_error.txt").unwrap());
-                                f.write_all(format!("{e:?}").as_bytes()).unwrap();
+                                if let Some(e) = e.downcast_ref::<&str>() {
+                                    f.write_all(format!("{e:?}").as_bytes()).unwrap();
+                                } else if let Some(e) = e.downcast_ref::<String>() {
+                                    f.write_all(format!("{e:?}").as_bytes()).unwrap();
+                                } else {
+                                    f.write_all(format!("{e:?}").as_bytes()).unwrap();
+                                }
                                 f.flush().unwrap();
                             }
                             state = PatcherState::EndUninstalledTalkA;
@@ -1616,7 +1793,13 @@ fn main() {
                                         BufWriter::new(File::create("patching_error.txt").unwrap());
                                     f.write_all(progress.lock().as_bytes()).unwrap();
                                     f.write_all("\n\n".as_bytes()).unwrap();
-                                    f.write_all(format!("{e:?}").as_bytes()).unwrap();
+                                    if let Some(e) = e.downcast_ref::<&str>() {
+                                        f.write_all(format!("{e:?}").as_bytes()).unwrap();
+                                    } else if let Some(e) = e.downcast_ref::<String>() {
+                                        f.write_all(format!("{e:?}").as_bytes()).unwrap();
+                                    } else {
+                                        f.write_all(format!("{e:?}").as_bytes()).unwrap();
+                                    }
                                     f.flush().unwrap();
                                 } else {
                                     success = true;
@@ -1662,7 +1845,7 @@ fn main() {
                             deltarune_path.lock().take();
                             state = PatcherState::FindFolder;
                         }
-                        goner_alpha = galpha;
+                        goner_alpha = galpha + 1.;
                     }
 
                     if go_lower {
@@ -1876,13 +2059,11 @@ fn main() {
                 soul.draw(&mut *d);
             }
             let alpha = (timer.elapsed().as_secs_f32() * 2.).sin() * 0.2 + 0.6;
-            let fake_galpha = if skipping { 1. } else { galpha };
-            //info!("galpha={fake_galpha:.2} falpha={falpha:.2} final={:.2}", fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
-            typer.draw(
-                &mut d,
-                alpha,
-                fake_galpha.clamp(0., 1.) * falpha.clamp(0., 1.),
-            );
+            /*info!(
+                "galpha={galpha:.2} falpha={falpha:.2} final={:.2}",
+                galpha.clamp(0., 1.) * falpha.clamp(0., 1.)
+            );*/
+            typer.draw(&mut d, alpha, galpha.clamp(0., 1.) * falpha.clamp(0., 1.));
             {
                 let cond;
                 #[cfg(not(feature = "uninstaller"))]
@@ -1920,7 +2101,8 @@ fn main() {
                 let cond;
                 #[cfg(not(feature = "uninstaller"))]
                 {
-                    cond = state == PatcherState::StartPatchQuestion;
+                    cond = state == PatcherState::StartPatchQuestion
+                        || state == PatcherState::PatchUpdateB;
                 }
                 #[cfg(feature = "uninstaller")]
                 {
