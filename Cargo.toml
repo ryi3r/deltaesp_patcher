@@ -1,6 +1,6 @@
 [package]
 name = "deltaesp_patcher"
-version = "1.0.23"
+version = "1.0.24"
 edition = "2024"
 authors = ["ryi3r <itsryi3r@gmail.com>"]
 
@@ -20,7 +20,7 @@ postcard = { version = "1.1.3", features = ["alloc"] }
 serde = "1.0.229"
 steamlocate = "2.1.1"
 rand = "0.10.3"
-parking_lot = "0.12.5"
+parking_lot = "0.13.0"
 oxidelta = { git = "https://github.com/sockudo/oxidelta.git", features = [
     "parallel",
 ] }
@@ -29,7 +29,7 @@ clap = "4.6.7"
 log = "0.4.34"
 ftail = "0.3.1"
 reqwest = { version = "0.13.5", features = ["blocking"] }
-webbrowser = "1.2.4"
+webbrowser = "1.2.5"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [
